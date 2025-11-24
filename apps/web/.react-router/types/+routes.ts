@@ -28,6 +28,11 @@ type Pages = {
   "/404": {
     params: {};
   };
+  "/*": {
+    params: {
+      "*": string;
+    };
+  };
   "/organizations": {
     params: {};
   };
@@ -77,7 +82,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/version" | "/healthcheck" | "/qwery/*" | "/404" | "/organizations" | "/org/:slug" | "/prj/:slug" | "/notebook/:slug" | "/prj/:slug/ds" | "/prj/:slug/ds/new" | "/prj/:slug/ds/:id/new" | "/ds/:slug" | "/prj/:slug/playground";
+    page: "/" | "/version" | "/healthcheck" | "/qwery/*" | "/404" | "/*" | "/organizations" | "/org/:slug" | "/prj/:slug" | "/notebook/:slug" | "/prj/:slug/ds" | "/prj/:slug/ds/new" | "/prj/:slug/ds/:id/new" | "/ds/:slug" | "/prj/:slug/playground";
   };
   "routes/version.ts": {
     id: "routes/version";
@@ -93,7 +98,7 @@ type RouteFiles = {
   };
   "routes/layout/layout.tsx": {
     id: "routes/layout/layout";
-    page: "/" | "/404";
+    page: "/" | "/404" | "/*";
   };
   "routes/index.tsx": {
     id: "routes/index";
@@ -102,6 +107,10 @@ type RouteFiles = {
   "routes/404.tsx": {
     id: "routes/404";
     page: "/404";
+  };
+  "routes/not-found.tsx": {
+    id: "routes/not-found";
+    page: "/*";
   };
   "routes/organizations/layout.tsx": {
     id: "routes/organizations/layout";
@@ -161,6 +170,7 @@ type RouteModules = {
   "routes/layout/layout": typeof import("./app/routes/layout/layout.tsx");
   "routes/index": typeof import("./app/routes/index.tsx");
   "routes/404": typeof import("./app/routes/404.tsx");
+  "routes/not-found": typeof import("./app/routes/not-found.tsx");
   "routes/organizations/layout": typeof import("./app/routes/organizations/layout.tsx");
   "routes/organizations/index": typeof import("./app/routes/organizations/index.tsx");
   "routes/organization/layout": typeof import("./app/routes/organization/layout.tsx");

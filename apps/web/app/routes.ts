@@ -15,6 +15,8 @@ const appRoutes = layout('routes/layout/layout.tsx', [
   index('routes/index.tsx'),
   // Generic not-found route (rendered inside main layout)
   route('404', 'routes/404.tsx'),
+  // Catch-all to render our 404 page for unmatched client routes
+  route('*', 'routes/not-found.tsx'),
 ]);
 
 const organisationsLayout = layout('routes/organizations/layout.tsx', [
