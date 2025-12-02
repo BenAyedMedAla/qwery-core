@@ -6,6 +6,7 @@ import {
 } from '@qwery/agent-factory-sdk';
 import {} from '@qwery/agent-factory-sdk';
 import { createRepositories } from '~/lib/repositories/repositories-factory';
+import { handleDomainException } from '~/lib/utils/error-handler';
 
 // Map to persist manager agent instances by conversation slug
 const agents = new Map<string, FactoryAgent>();
@@ -40,44 +41,48 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   //const agent = managerAgent.getAgent();
-  const streamResponse = await agent.respond({
-    messages: await validateUIMessages({ messages }),
-  });
+  try {
+    const streamResponse = await agent.respond({
+      messages: await validateUIMessages({ messages }),
+    });
 
-  if (!streamResponse.body) {
-    return new Response(null, { status: 204 });
-  }
+    if (!streamResponse.body) {
+      return new Response(null, { status: 204 });
+    }
 
-  // Create a ReadableStream that forwards chunks from the manager agent
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = streamResponse.body!.getReader();
-      const decoder = new TextDecoder();
+    // Create a ReadableStream that forwards chunks from the manager agent
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = streamResponse.body!.getReader();
+        const decoder = new TextDecoder();
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            controller.close();
-            break;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              controller.close();
+              break;
+            }
+
+            const chunk = decoder.decode(value, { stream: true });
+            controller.enqueue(new TextEncoder().encode(chunk));
           }
-
-          const chunk = decoder.decode(value, { stream: true });
-          controller.enqueue(new TextEncoder().encode(chunk));
+        } catch (error) {
+          controller.error(error);
+        } finally {
+          reader.releaseLock();
         }
-      } catch (error) {
-        controller.error(error);
-      } finally {
-        reader.releaseLock();
-      }
-    },
-  });
+      },
+    });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
-  });
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    });
+  } catch (error) {
+    return handleDomainException(error);
+  }
 }

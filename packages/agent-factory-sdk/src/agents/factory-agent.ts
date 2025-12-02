@@ -3,6 +3,7 @@ import { createActor } from 'xstate';
 import { nanoid } from 'nanoid';
 import { createStateMachine } from './state-machine';
 import { Repositories } from '@qwery/domain/repositories';
+import { DomainException } from '@qwery/domain/exceptions';
 import { ActorRegistry } from './utils/actor-registry';
 import { persistState } from './utils/state-persistence';
 import {
@@ -104,13 +105,27 @@ export class FactoryAgent {
     // Get the current input message to track which request this is for
     const lastMessage = opts.messages[opts.messages.length - 1];
 
-    // Persist latest user message
+    // Persist latest user message (non-blocking, errors are logged but don't block)
+    // If conversation doesn't exist, we'll log a warning but allow the agent to respond
     const messagePersistenceService = new MessagePersistenceService(
       this.repositories.message,
       this.repositories.conversation,
       this.conversationSlug,
     );
-    messagePersistenceService.persistMessages([lastMessage as UIMessage]);
+    messagePersistenceService
+      .persistMessages([lastMessage as UIMessage])
+      .catch((error) => {
+        if (error instanceof DomainException) {
+          console.warn(
+            `Conversation ${this.conversationSlug} not found - messages will not be persisted. Agent will still respond.`,
+          );
+        } else {
+          console.warn(
+            `Failed to persist message for conversation ${this.conversationSlug}:`,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      });
 
     const textPart = lastMessage?.parts.find((p) => p.type === 'text');
     const currentInputMessage =
@@ -270,7 +285,20 @@ export class FactoryAgent {
                         this.repositories.conversation,
                         this.conversationSlug,
                       );
-                    messagePersistenceService.persistMessages(messages);
+                    try {
+                      await messagePersistenceService.persistMessages(messages);
+                    } catch (error) {
+                      if (error instanceof DomainException) {
+                        console.warn(
+                          `Conversation ${this.conversationSlug} not found - messages will not be persisted. Response already sent to client.`,
+                        );
+                      } else {
+                        console.warn(
+                          `Failed to persist messages for conversation ${this.conversationSlug}:`,
+                          error instanceof Error ? error.message : String(error),
+                        );
+                      }
+                    }
                   },
                 });
                 subscription.unsubscribe();
@@ -285,12 +313,29 @@ export class FactoryAgent {
         }
       });
 
-      // Check if we're already in idle state, if so send USER_INPUT immediately
+      // Wait for state machine to be in idle before sending USER_INPUT
       const currentState = this.factoryActor.getSnapshot().value;
-      if (currentState === 'idle') {
-        sendUserInput();
+      const isIdle = currentState === 'idle' || String(currentState).includes('idle');
+      
+      if (!isIdle) {
+        setTimeout(() => {
+          console.log(
+            `Sending USER_INPUT event. Current state: ${this.factoryActor.getSnapshot().value}`,
+          );
+          this.factoryActor.send({
+            type: 'USER_INPUT',
+            messages: opts.messages,
+          });
+        }, 100);
+      } else {
+        this.factoryActor.send({
+          type: 'USER_INPUT',
+          messages: opts.messages,
+        });
+        console.log(
+          `USER_INPUT sent. New state: ${this.factoryActor.getSnapshot().value}`,
+        );
       }
-      // Otherwise, the subscription handler will send USER_INPUT when state reaches idle
     });
   }
 }

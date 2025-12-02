@@ -6,6 +6,7 @@ import {
   greetingActor,
   readDataAgentActor,
   loadContextActor,
+  systemInfoActor,
 } from './actors';
 import { Repositories } from '@qwery/domain/repositories';
 import { createCachedActor } from './utils/actor-cache';
@@ -31,6 +32,7 @@ export const createStateMachine = (
       greetingActor,
       readDataAgentActor,
       loadContextActor,
+      systemInfoActor,
     },
     guards: {
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,6 +43,9 @@ export const createStateMachine = (
 
       isReadData: ({ event }) => event.output?.intent === 'read-data',
 
+      isSystem: ({ event }) => event.output?.intent === 'system',
+
+      // NEW: Check if should retry
       shouldRetry: ({ context }) => {
         const retryCount = context.retryCount || 0;
         return retryCount < 3;
@@ -160,6 +165,14 @@ export const createStateMachine = (
                     {
                       guard: 'isReadData',
                       target: '#factory-agent.running.readData',
+                      actions: assign({
+                        intent: ({ event }) => event.output,
+                        retryCount: () => 0,
+                      }),
+                    },
+                    {
+                      guard: 'isSystem',
+                      target: '#factory-agent.running.systemInfo',
                       actions: assign({
                         intent: ({ event }) => event.output,
                         retryCount: () => 0,
@@ -365,6 +378,35 @@ export const createStateMachine = (
             },
             onDone: {
               target: 'streaming',
+            },
+          },
+          systemInfo: {
+            invoke: {
+              src: 'systemInfoActor',
+              id: 'SYSTEM_INFO',
+              input: ({ context }: { context: AgentContext }) => ({
+                inputMessage: context.inputMessage,
+              }),
+              onDone: {
+                target: 'streaming',
+                actions: assign({
+                  streamResult: ({ event }) => event.output,
+                }),
+              },
+              onError: {
+                target: '#factory-agent.idle',
+                actions: assign({
+                  error: ({ event }) => {
+                    const errorMsg =
+                      event.error instanceof Error
+                        ? event.error.message
+                        : String(event.error);
+                    console.error('systemInfo error:', errorMsg, event.error);
+                    return errorMsg;
+                  },
+                  streamResult: undefined,
+                }),
+              },
             },
           },
           streaming: {
