@@ -6,7 +6,7 @@ import { InteractiveQueryHandler } from './interactive-query-handler';
 import { InteractiveCommandRouter } from './interactive-command-router';
 import { printInteractiveResult } from '../utils/output';
 import { colored, colors } from '../utils/formatting';
-import { FactoryAgent, validateUIMessages } from '@qwery/agent-factory-sdk';
+import { FactoryAgent, validateUIMessages, MessagePersistenceService, type UIMessage } from '@qwery/agent-factory-sdk';
 import { nanoid } from 'nanoid';
 
 export class InteractiveRepl {
@@ -179,6 +179,7 @@ export class InteractiveRepl {
 
       if (!isSqlQuery) {
         // Natural language query - use FactoryAgent (no datasource needed)
+        // FactoryAgent will handle greetings, help, and other intents
         await this.handleNaturalLanguageQuery(query);
         return;
       }
@@ -259,7 +260,9 @@ export class InteractiveRepl {
       );
       const { readDataAgent } = readDataAgentModule;
       const { nanoid } = await import('nanoid');
-      const { validateUIMessages, convertToModelMessages } = await import('ai');
+      const { validateUIMessages } = await import('ai');
+      const { v4: uuidv4 } = await import('uuid');
+      const { GetMessagesByConversationIdService } = await import('@qwery/domain/services');
 
       // Use a persistent conversation ID for follow-up questions
       if (!this.conversationId || !this.conversationId.includes('read-data')) {
@@ -267,16 +270,68 @@ export class InteractiveRepl {
       }
       this.isReadDataAgentSession = true; // Mark as Google Sheets session
 
-      const messages = [
-        {
-          id: nanoid(),
-          role: 'user' as const,
-          parts: [{ type: 'text' as const, text: query }],
-        },
-      ];
+      const repositories = this.container.getRepositories();
+
+      // Ensure conversation exists in repository
+      let conversation = await repositories.conversation.findBySlug(this.conversationId);
+      if (!conversation) {
+        // Conversation doesn't exist, create it
+        const conversationId = uuidv4();
+        const now = new Date();
+        await repositories.conversation.create({
+          id: conversationId,
+          slug: this.conversationId,
+          title: 'CLI Read Data Conversation',
+          projectId: uuidv4(),
+          taskId: uuidv4(),
+          datasources: [],
+          createdAt: now,
+          updatedAt: now,
+          createdBy: 'cli',
+          updatedBy: 'cli',
+        });
+        // Reload conversation to ensure it exists
+        conversation = await repositories.conversation.findBySlug(this.conversationId);
+        if (!conversation) {
+          throw new Error(`Failed to create conversation with slug: ${this.conversationId}`);
+        }
+      }
+
+      // Load previous messages from conversation
+      const loadMessagesUseCase = new GetMessagesByConversationIdService(repositories.message);
+      let previousMessages: UIMessage[] = [];
+      if (conversation) {
+        try {
+          const messageOutputs = await loadMessagesUseCase.execute({ 
+            conversationId: conversation.id 
+          });
+          previousMessages = MessagePersistenceService.convertToUIMessages(messageOutputs);
+        } catch {
+          // No previous messages, start fresh
+          previousMessages = [];
+        }
+      }
+
+      // Create current user message
+      const userMessage: UIMessage = {
+        id: nanoid(),
+        role: 'user',
+        parts: [{ type: 'text', text: query }],
+      };
+
+      // Build messages array with history + current query
+      const messages = [...previousMessages, userMessage];
 
       // Validate messages
       await validateUIMessages({ messages });
+
+      // Persist user message before processing
+      const messagePersistenceService = new MessagePersistenceService(
+        repositories.message,
+        repositories.conversation,
+        this.conversationId,
+      );
+      await messagePersistenceService.persistMessages([userMessage], 'cli');
 
       console.log('\n' + colored('💬 Processing...', colors.brand) + '\n');
 
@@ -332,6 +387,16 @@ export class InteractiveRepl {
           } catch {
             // Tool results might not be available, ignore
           }
+        }
+
+        // Persist assistant response after streaming completes
+        if (fullText.trim()) {
+          const assistantMessage: UIMessage = {
+            id: nanoid(),
+            role: 'assistant',
+            parts: [{ type: 'text', text: fullText }],
+          };
+          await messagePersistenceService.persistMessages([assistantMessage], 'agent');
         }
       } catch (error) {
         console.error(

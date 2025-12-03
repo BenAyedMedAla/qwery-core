@@ -84,6 +84,20 @@ export class FactoryAgent {
         }
       }, 120000);
 
+      let userInputSent = false;
+
+      const sendUserInput = () => {
+        if (!userInputSent) {
+          userInputSent = true;
+          console.log(`[FactoryAgent ${this.id}] Sending USER_INPUT event with message: "${currentInputMessage}"`);
+          this.factoryActor.send({
+            type: 'USER_INPUT',
+            messages: opts.messages,
+          });
+          console.log(`[FactoryAgent ${this.id}] USER_INPUT sent, current state:`, this.factoryActor.getSnapshot().value);
+        }
+      };
+
       const subscription = this.factoryActor.subscribe((state) => {
         const ctx = state.context;
         const currentState =
@@ -93,8 +107,20 @@ export class FactoryAgent {
         lastState = currentState;
         stateChangeCount++;
 
+        // Debug logging for state transitions
+        if (stateChangeCount <= 5 || currentState.includes('detectIntent') || currentState.includes('greeting')) {
+          console.log(`[FactoryAgent ${this.id}] State: ${currentState}, Changes: ${stateChangeCount}, HasError: ${!!ctx.error}, HasStreamResult: ${!!ctx.streamResult}`);
+        }
+
+        // Wait for idle state before sending USER_INPUT
+        if (currentState === 'idle' && !userInputSent) {
+          sendUserInput();
+          return;
+        }
+
         // Check for errors in context
         if (ctx.error) {
+          console.error(`[FactoryAgent ${this.id}] Error in context:`, ctx.error);
           if (!resolved) {
             resolved = true;
             clearTimeout(timeout);
@@ -123,7 +149,7 @@ export class FactoryAgent {
         // Check if we're stuck in detectIntent for too long
         if (currentState.includes('detectIntent') && stateChangeCount > 10) {
           console.warn(
-            `FactoryAgent ${this.id} appears stuck in detectIntent; waiting for state change...`,
+            `[FactoryAgent ${this.id}] Appears stuck in detectIntent after ${stateChangeCount} state changes`,
           );
           return;
         }
@@ -177,12 +203,12 @@ export class FactoryAgent {
         }
       });
 
-      // Kick off the state transition and LLM call
-      // The state machine will clear any previous streamResult when USER_INPUT is received
-      this.factoryActor.send({
-        type: 'USER_INPUT',
-        messages: opts.messages,
-      });
+      // Check if we're already in idle state, if so send USER_INPUT immediately
+      const currentState = this.factoryActor.getSnapshot().value;
+      if (currentState === 'idle') {
+        sendUserInput();
+      }
+      // Otherwise, the subscription handler will send USER_INPUT when state reaches idle
     });
   }
 }

@@ -20,6 +20,10 @@ import {
   type RegistryContext,
 } from '../../tools/view-registry';
 import { READ_DATA_AGENT_PROMPT } from '../prompts/read-data-agent.prompt';
+import {
+  analyzeSchemaAndUpdateContext,
+  loadBusinessContext,
+} from '../../services/business-context.service';
 
 // Support both import.meta.env (Vite/browser) and process.env (Node.js)
 const WORKSPACE = resolveWorkspaceDir();
@@ -104,6 +108,10 @@ export const readDataAgent = async (
             viewName: record.viewName,
           });
 
+          // Extract schema and build business context
+          const schema = await extractSchema({ dbPath, viewName: record.viewName });
+          await analyzeSchemaAndUpdateContext(fileDir, record.viewName, schema);
+
           return {
             content: `${message}${isNew ? '' : ' (view already existed, updated)'}`,
             viewName: record.viewName,
@@ -138,7 +146,7 @@ export const readDataAgent = async (
       }),
       getSchema: tool({
         description:
-          'Get the schema of one or all Google Sheet views. If viewName is provided, returns schema for that specific view. If not provided, returns schemas for all available views. Use this to understand the data structure before writing queries.',
+          'Get the schema of one or all Google Sheet views. If viewName is provided, returns schema for that specific view. If not provided, returns schemas for all available views. Use this to understand the data structure before writing queries. This also updates the business context automatically.',
         inputSchema: z.object({
           viewName: z.string().optional(),
         }),
@@ -148,10 +156,38 @@ export const readDataAgent = async (
           }
           const { join } = await import('node:path');
           const dbPath = join(WORKSPACE, conversationId, 'database.db');
+          const fileDir = join(WORKSPACE, conversationId);
 
           const schema = await extractSchema({ dbPath, viewName });
+          
+          // Update business context if a specific view is requested
+          if (viewName) {
+            await analyzeSchemaAndUpdateContext(fileDir, viewName, schema);
+          } else {
+            // If no viewName, update context for all views
+            for (const table of schema.tables) {
+              await analyzeSchemaAndUpdateContext(fileDir, table.tableName, {
+                ...schema,
+                tables: [table],
+              });
+            }
+          }
+          
+          // Load and include business context in response
+          const businessContext = await loadBusinessContext(fileDir);
+          
           return {
             schema: schema,
+            businessContext: businessContext
+              ? {
+                  domain: businessContext.domain,
+                  entities: Array.from(businessContext.entities.values()).slice(0, 10), // Limit for response size
+                  relationships: businessContext.relationships.slice(0, 10),
+                  vocabulary: Object.fromEntries(
+                    Array.from(businessContext.vocabulary.entries()).slice(0, 20),
+                  ),
+                }
+              : null,
           };
         },
       }),
