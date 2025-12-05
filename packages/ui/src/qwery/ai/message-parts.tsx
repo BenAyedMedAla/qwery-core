@@ -24,6 +24,19 @@ import {
   ToolInput,
   ToolOutput,
 } from '../../ai-elements/tool';
+import { ChartRenderer, type ChartConfig } from './chart-renderer';
+import { ChartTypeSelector, type ChartTypeSelection } from './chart-type-selector';
+import { SQLQueryVisualizer, type SQLQueryResult } from './sql-query-visualizer';
+import { SchemaVisualizer, type SchemaData } from './schema-visualizer';
+import {
+  AvailableSheetsVisualizer,
+  type AvailableSheetsData,
+} from './available-sheets-visualizer';
+import {
+  ViewSheetVisualizer,
+  type ViewSheetData,
+} from './view-sheet-visualizer';
+import { ViewSheetError } from './view-sheet-error';
 import {
   Source,
   Sources,
@@ -187,8 +200,394 @@ export interface ToolPartProps {
   index: number;
 }
 
+function ChartToolOutput({
+  output,
+  errorText,
+}: {
+  output: ToolUIPart['output'];
+  errorText: ToolUIPart['errorText'];
+}) {
+  if (errorText) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  if (!output) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  // Parse output - it might be a string (JSON) or an object
+  let parsedOutput: unknown = output;
+  if (typeof output === 'string') {
+    try {
+      parsedOutput = JSON.parse(output);
+    } catch {
+      // If parsing fails, it's not JSON, fall back to regular output
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  // Debug logging
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[ChartToolOutput] Output type:', typeof output);
+    console.log('[ChartToolOutput] Parsed output:', parsedOutput);
+  }
+
+  // Check if output matches chart config structure
+  if (
+    parsedOutput &&
+    typeof parsedOutput === 'object' &&
+    !Array.isArray(parsedOutput) &&
+    'chartType' in parsedOutput &&
+    'data' in parsedOutput &&
+    'config' in parsedOutput
+  ) {
+    try {
+      const chartConfig = parsedOutput as ChartConfig;
+      
+      // Validate chart config has required fields
+      if (
+        !chartConfig.chartType ||
+        !Array.isArray(chartConfig.data) ||
+        !chartConfig.config
+      ) {
+        console.warn('[ChartToolOutput] Invalid chart config structure:', chartConfig);
+        return <ToolOutput output={output} errorText={errorText} />;
+      }
+
+      return (
+        <div className="min-w-0 space-y-2 p-4">
+          <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Chart
+          </h4>
+          <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4 w-full">
+            <ChartRenderer chartConfig={chartConfig} />
+          </div>
+        </div>
+      );
+    } catch (error) {
+      console.error('[ChartToolOutput] Error rendering chart:', error, parsedOutput);
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  return <ToolOutput output={output} errorText={errorText} />;
+}
+
+function ChartTypeSelectionOutput({
+  output,
+  errorText,
+}: {
+  output: ToolUIPart['output'];
+  errorText: ToolUIPart['errorText'];
+}) {
+  if (errorText) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  if (!output) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  // Parse output - it might be a string (JSON) or an object
+  let parsedOutput: unknown = output;
+  if (typeof output === 'string') {
+    try {
+      parsedOutput = JSON.parse(output);
+    } catch {
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  // Check if output matches chart type selection structure
+  if (
+    parsedOutput &&
+    typeof parsedOutput === 'object' &&
+    !Array.isArray(parsedOutput) &&
+    'chartType' in parsedOutput &&
+    'reasoning' in parsedOutput
+  ) {
+    try {
+      const selection = parsedOutput as ChartTypeSelection;
+      return (
+        <div className="min-w-0 space-y-2 p-4">
+          <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Chart Type Selection
+          </h4>
+          <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
+            <ChartTypeSelector selection={selection} />
+          </div>
+        </div>
+      );
+    } catch (error) {
+      console.error('[ChartTypeSelectionOutput] Error:', error);
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  return <ToolOutput output={output} errorText={errorText} />;
+}
+
+function SchemaOutput({
+  output,
+  errorText,
+}: {
+  output: ToolUIPart['output'];
+  errorText: ToolUIPart['errorText'];
+}) {
+  if (errorText) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  if (!output) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  // Parse output - it might be a string (JSON) or an object
+  let parsedOutput: unknown = output;
+  if (typeof output === 'string') {
+    try {
+      parsedOutput = JSON.parse(output);
+    } catch {
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  // Check if output matches schema structure
+  if (
+    parsedOutput &&
+    typeof parsedOutput === 'object' &&
+    !Array.isArray(parsedOutput) &&
+    'schema' in parsedOutput &&
+    parsedOutput.schema &&
+    typeof parsedOutput.schema === 'object' &&
+    'tables' in parsedOutput.schema
+  ) {
+    try {
+      const schema = parsedOutput.schema as SchemaData;
+      return (
+        <div className="min-w-0 space-y-2 p-4">
+          <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Schema
+          </h4>
+          <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
+            <SchemaVisualizer schema={schema} />
+          </div>
+        </div>
+      );
+    } catch (error) {
+      console.error('[SchemaOutput] Error:', error);
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  return <ToolOutput output={output} errorText={errorText} />;
+}
+
+function SQLQueryOutput({
+  output,
+  input,
+  errorText,
+}: {
+  output: ToolUIPart['output'];
+  input: ToolUIPart['input'];
+  errorText: ToolUIPart['errorText'];
+}) {
+  if (errorText) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  if (!output) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  // Parse output - it might be a string (JSON) or an object
+  let parsedOutput: unknown = output;
+  if (typeof output === 'string') {
+    try {
+      parsedOutput = JSON.parse(output);
+    } catch {
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  // Extract query from input
+  let query: string | undefined;
+  if (input && typeof input === 'object' && 'query' in input) {
+    query = typeof input.query === 'string' ? input.query : undefined;
+  }
+
+  // Check if output matches SQL query result structure
+  if (
+    parsedOutput &&
+    typeof parsedOutput === 'object' &&
+    !Array.isArray(parsedOutput) &&
+    'result' in parsedOutput &&
+    parsedOutput.result &&
+    typeof parsedOutput.result === 'object' &&
+    'columns' in parsedOutput.result &&
+    'rows' in parsedOutput.result
+  ) {
+    try {
+      const result = parsedOutput as SQLQueryResult;
+      return (
+        <div className="min-w-0 space-y-2 p-4">
+          <SQLQueryVisualizer query={query} result={result} />
+        </div>
+      );
+    } catch (error) {
+      console.error('[SQLQueryOutput] Error:', error);
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  return <ToolOutput output={output} errorText={errorText} />;
+}
+
+function AvailableSheetsOutput({
+  output,
+  errorText,
+}: {
+  output: ToolUIPart['output'];
+  errorText: ToolUIPart['errorText'];
+}) {
+  if (errorText) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  if (!output) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  // Parse output - it might be a string (JSON) or an object
+  let parsedOutput: unknown = output;
+  if (typeof output === 'string') {
+    try {
+      parsedOutput = JSON.parse(output);
+    } catch {
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  // Check if output matches available sheets structure
+  if (
+    parsedOutput &&
+    typeof parsedOutput === 'object' &&
+    !Array.isArray(parsedOutput) &&
+    'sheets' in parsedOutput &&
+    Array.isArray(parsedOutput.sheets)
+  ) {
+    try {
+      const data = parsedOutput as AvailableSheetsData;
+      return (
+        <div className="min-w-0 space-y-2 p-4">
+          <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Available Sheets
+          </h4>
+          <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
+            <AvailableSheetsVisualizer data={data} />
+          </div>
+        </div>
+      );
+    } catch (error) {
+      console.error('[AvailableSheetsOutput] Error:', error);
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  return <ToolOutput output={output} errorText={errorText} />;
+}
+
+function ViewSheetOutput({
+  output,
+  errorText,
+  input,
+  availableSheets,
+  onRetry,
+}: {
+  output: ToolUIPart['output'];
+  errorText: ToolUIPart['errorText'];
+  input?: ToolUIPart['input'];
+  availableSheets?: string[];
+  onRetry?: (sheetName: string) => void;
+}) {
+  if (errorText) {
+    // Extract sheet name from input if available
+    let sheetName: string | undefined;
+    if (input && typeof input === 'object' && 'sheetName' in input) {
+      sheetName =
+        typeof input.sheetName === 'string' ? input.sheetName : undefined;
+    }
+
+    return (
+      <div className="min-w-0 space-y-2 p-4">
+        <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+          Sheet View
+        </h4>
+        <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
+          <ViewSheetError
+            errorText={errorText}
+            sheetName={sheetName}
+            availableSheets={availableSheets}
+            onRetry={onRetry}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (!output) {
+    return <ToolOutput output={output} errorText={errorText} />;
+  }
+
+  // Parse output - it might be a string (JSON) or an object
+  let parsedOutput: unknown = output;
+  if (typeof output === 'string') {
+    try {
+      parsedOutput = JSON.parse(output);
+    } catch {
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  // Check if output matches view sheet structure
+  if (
+    parsedOutput &&
+    typeof parsedOutput === 'object' &&
+    !Array.isArray(parsedOutput) &&
+    'sheetName' in parsedOutput &&
+    'columns' in parsedOutput &&
+    'rows' in parsedOutput
+  ) {
+    try {
+      const data = parsedOutput as ViewSheetData;
+      return (
+        <div className="min-w-0 space-y-2 p-4">
+          <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Sheet View
+          </h4>
+          <div className="bg-muted/50 max-w-full min-w-0 overflow-hidden rounded-md p-4">
+            <ViewSheetVisualizer data={data} />
+          </div>
+        </div>
+      );
+    } catch (error) {
+      console.error('[ViewSheetOutput] Error:', error);
+      return <ToolOutput output={output} errorText={errorText} />;
+    }
+  }
+
+  return <ToolOutput output={output} errorText={errorText} />;
+}
+
 export function ToolPart({ part, messageId, index }: ToolPartProps) {
   const toolName = part.type.replace('tool-', '');
+  const isGenerateChart = part.type === 'tool-generateChart';
+  const isSelectChartType = part.type === 'tool-selectChartType';
+  const isRunQuery = part.type === 'tool-runQuery';
+  const isGetSchema = part.type === 'tool-getSchema';
+  const isListAvailableSheets =
+    part.type === 'tool-listAvailableSheets';
+  const isViewSheet = part.type === 'tool-viewSheet';
 
   return (
     <Tool
@@ -197,8 +596,44 @@ export function ToolPart({ part, messageId, index }: ToolPartProps) {
     >
       <ToolHeader title={toolName} type={part.type} state={part.state} />
       <ToolContent>
-        {part.input != null ? <ToolInput input={part.input} /> : null}
-        <ToolOutput output={part.output} errorText={part.errorText} />
+        {part.input != null &&
+        !isRunQuery &&
+        !isGetSchema &&
+        !isListAvailableSheets &&
+        !isViewSheet ? (
+          <ToolInput input={part.input} />
+        ) : null}
+        {isSelectChartType ? (
+          <ChartTypeSelectionOutput
+            output={part.output}
+            errorText={part.errorText}
+          />
+        ) : isGenerateChart ? (
+          <ChartToolOutput output={part.output} errorText={part.errorText} />
+        ) : isGetSchema ? (
+          <SchemaOutput
+            output={part.output}
+            errorText={part.errorText}
+          />
+        ) : isRunQuery ? (
+          <SQLQueryOutput
+            output={part.output}
+            input={part.input}
+            errorText={part.errorText}
+          />
+        ) : isListAvailableSheets ? (
+          <AvailableSheetsOutput
+            output={part.output}
+            errorText={part.errorText}
+          />
+        ) : isViewSheet ? (
+          <ViewSheetOutput
+            output={part.output}
+            errorText={part.errorText}
+          />
+        ) : (
+          <ToolOutput output={part.output} errorText={part.errorText} />
+        )}
       </ToolContent>
     </Tool>
   );

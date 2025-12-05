@@ -37,6 +37,7 @@ export const detectIntent = async (text: string) => {
         return {
           intent: 'other' as const,
           complexity: intentObject.complexity,
+          needsChart: intentObject.needsChart ?? false,
         };
       }
 
@@ -61,6 +62,7 @@ export const detectIntent = async (text: string) => {
   return {
     intent: 'other' as const,
     complexity: 'simple' as const,
+    needsChart: false,
   };
 };
 

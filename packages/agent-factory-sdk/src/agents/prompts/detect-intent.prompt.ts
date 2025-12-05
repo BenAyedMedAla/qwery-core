@@ -7,6 +7,7 @@ export const DETECT_INTENT_PROMPT = (
 You are responsible for detecting the intent of the user's message and classifying it into a predefined intent and estimating the complexity of the task.
 - classify it into **one** of the predefined intents
 - estimate the **complexity** of the task
+- determine if a chart/graph visualization is needed (**needsChart**)
 
 If the user asks for something that does not match any supported intent,
 you MUST answer with intent "other".
@@ -29,23 +30,37 @@ Guidelines:
 - Consider message clarity: short, specific messages = higher confidence; long, vague messages = lower confidence
 - Consider keyword matching: messages with intent-specific keywords = higher confidence
 
+Chart/Graph Detection (needsChart):
+- Set needsChart to true if:
+  - User explicitly mentions visualization keywords: "graph", "chart", "visualize", "show", "plot", "display", "visualization"
+  - User asks for comparisons, trends, or analysis that would benefit from visual representation
+  - Query intent suggests aggregations, time series, or comparative analysis
+- Set needsChart to false if:
+  - User just wants raw data or simple queries
+  - No visualization keywords or visual analysis intent detected
+
 Examples:
-- "who are you?" → intent: "system", complexity: "simple"
-- "what is Qwery?" → intent: "system", complexity: "simple"
-- "what can you do?" → intent: "system", complexity: "simple"
-- "hi" → intent: "greeting", complexity: "simple"
-- "show me sales data" → intent: "read-data", complexity: "medium"
+- "who are you?" → intent: "system", complexity: "simple", needsChart: false
+- "what is Qwery?" → intent: "system", complexity: "simple", needsChart: false
+- "what can you do?" → intent: "system", complexity: "simple", needsChart: false
+- "hi" → intent: "greeting", complexity: "simple", needsChart: false
+- "show me sales data" → intent: "read-data", complexity: "medium", needsChart: false
+- "show me a chart of sales by month" → intent: "read-data", complexity: "medium", needsChart: true
+- "visualize the trends" → intent: "read-data", complexity: "medium", needsChart: true
+- "compare sales by region" → intent: "read-data", complexity: "medium", needsChart: true
 
 ## Output Format
 {
 "intent": "string",
-"complexity": "string"
+"complexity": "string",
+"needsChart": boolean
 }
 
 Respond ONLY with a strict JSON object using this schema:
 {
   "intent": "one of the supported intent names or \"other\"",
   "complexity": "simple" | "medium" | "complex",
+  "needsChart": boolean
 }
 
 User message:

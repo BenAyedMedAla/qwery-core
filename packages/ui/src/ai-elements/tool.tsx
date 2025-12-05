@@ -25,7 +25,7 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
     className={cn(
-      'not-prose mb-4 w-full max-w-full rounded-md border',
+      'not-prose mb-4 flex w-full max-w-full flex-col rounded-md border overflow-hidden',
       className,
     )}
     {...props}
@@ -77,7 +77,7 @@ export const ToolHeader = ({
 }: ToolHeaderProps) => (
   <CollapsibleTrigger
     className={cn(
-      'flex w-full items-center justify-between gap-4 p-3',
+      'sticky top-0 z-10 flex w-full items-center justify-between gap-4 border-b bg-background p-3',
       className,
     )}
     {...props}

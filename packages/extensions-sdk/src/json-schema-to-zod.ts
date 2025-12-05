@@ -30,7 +30,14 @@ export function jsonSchemaToZod(schema: JsonSchema): z.ZodTypeAny {
           schema.description,
         );
       }
-      return withDescription(z.string(), schema.description);
+      // Handle format constraints
+      let stringSchema = z.string();
+      if (schema.format === 'uri' || schema.format === 'url') {
+        stringSchema = z.string().url();
+      } else if (schema.format === 'email') {
+        stringSchema = z.string().email();
+      }
+      return withDescription(stringSchema, schema.description);
     }
     case 'number':
     case 'integer': {

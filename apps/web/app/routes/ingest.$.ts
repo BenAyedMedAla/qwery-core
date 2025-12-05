@@ -36,13 +36,35 @@ const posthogProxy = async (request: Request, splat?: string) => {
     (fetchOptions as { duplex?: string }).duplex = 'half';
   }
 
-  const response = await fetch(newUrl, fetchOptions);
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased to 15s
 
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
+    fetchOptions.signal = controller.signal;
+
+    const response = await fetch(newUrl, fetchOptions);
+    clearTimeout(timeoutId);
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } catch (error) {
+    // Handle timeout and network errors gracefully
+    if (error instanceof Error && error.name === 'AbortError') {
+      // Only log in development
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[PostHog Proxy] Request timeout:', newUrl.toString());
+      }
+      return new Response('Request timeout', { status: 504 });
+    }
+    // Only log in development to reduce noise
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[PostHog Proxy] Fetch error:', error);
+    }
+    return new Response('Proxy error', { status: 502 });
+  }
 };
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) =>

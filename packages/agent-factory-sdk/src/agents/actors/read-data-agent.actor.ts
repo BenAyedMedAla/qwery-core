@@ -25,6 +25,23 @@ import {
   loadDatasources,
   groupDatasourcesByType,
 } from '../../tools/datasource-loader';
+import { listAvailableSheets } from '../../tools/list-available-sheets';
+import { viewSheet } from '../../tools/view-sheet';
+import { generateChart, selectChartType } from '../tools/generate-chart';
+import { gsheetToDuckdb } from '../../tools/gsheet-to-duckdb';
+import { extractSchema } from '../../tools/extract-schema';
+import {
+  registerSheetView,
+  loadViewRegistry,
+  generateSemanticViewName,
+  validateTableExists,
+  createViewFromTable,
+  dropTable,
+  cleanupOrphanedTempTables,
+  withRetry,
+  formatViewCreationError,
+  type RegistryContext,
+} from '../../tools/view-registry';
 
 // Lazy workspace resolution - only resolve when actually needed, not at module load time
 // This prevents side effects when the module is imported in browser/SSR contexts
@@ -451,6 +468,254 @@ export const readDataAgent = async (
           };
         },
       }),
+      createDbViewFromSheet: tool({
+        description:
+          'Create a View from a Google Sheet. Can handle single or multiple sheets. IMPORTANT: Only use this when the user explicitly provides NEW Google Sheet URLs that are not already in the registry. Always call listAvailableSheets first to check if sheets already exist. This tool works alongside the datasource initialization system - use it for ad-hoc imports during conversation.',
+        inputSchema: z.object({
+          sharedLink: z.union([z.string(), z.array(z.string())]),
+        }),
+        execute: async ({ sharedLink }) => {
+          const workspace = getWorkspace();
+          if (!workspace) {
+            throw new Error('WORKSPACE environment variable is not set');
+          }
+          const { join } = await import('node:path');
+          const { mkdir } = await import('node:fs/promises');
+          await mkdir(workspace, { recursive: true });
+          const fileDir = join(workspace, conversationId);
+          await mkdir(fileDir, { recursive: true });
+          const dbPath = join(fileDir, 'database.db');
+
+          await cleanupOrphanedTempTables(dbPath);
+
+          const context: RegistryContext = {
+            conversationDir: fileDir,
+          };
+
+          // Handle single or multiple links
+          const links = Array.isArray(sharedLink) ? sharedLink : [sharedLink];
+          const results: Array<{
+            success: boolean;
+            viewName?: string;
+            displayName?: string;
+            error?: string;
+            link: string;
+          }> = [];
+
+          // Process sequentially to avoid race conditions
+          for (const link of links) {
+            try {
+              const result = await withRetry(
+                async () => {
+                  // Check if view already exists
+                  const existing = await loadViewRegistry(context);
+                  const sourceId = link.match(
+                    /https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/,
+                  )?.[1];
+                  const existingRecord = sourceId
+                    ? existing.find((rec) => rec.sourceId === sourceId)
+                    : null;
+
+                  if (existingRecord) {
+                    // Validate view exists in database
+                    const exists = await validateTableExists(
+                      dbPath,
+                      existingRecord.viewName,
+                    );
+                    if (!exists) {
+                      // View in registry but not in DB - recreate it
+                      console.debug(
+                        `[ReadDataAgent:${conversationId}] View in registry but missing in DB, recreating: ${existingRecord.viewName}`,
+                      );
+                      await gsheetToDuckdb({
+                        dbPath,
+                        sharedLink: link,
+                        viewName: existingRecord.viewName,
+                      });
+                      // Validate it was created
+                      const recreated = await validateTableExists(
+                        dbPath,
+                        existingRecord.viewName,
+                      );
+                      if (!recreated) {
+                        throw new Error('Failed to recreate view in database');
+                      }
+                    }
+
+                    return {
+                      viewName: existingRecord.viewName,
+                      displayName:
+                        existingRecord.displayName || existingRecord.viewName,
+                      sharedLink: existingRecord.sharedLink,
+                    };
+                  }
+
+                  const tempViewName = `temp_${Date.now()}_${Math.random()
+                    .toString(36)
+                    .substring(2, 8)}`;
+
+                  let finalViewName: string | null = null;
+                  let schema: SimpleSchema | null = null;
+
+                  try {
+                    // Step 1: Create temp view to extract schema for semantic naming
+                    console.debug(
+                      `[ReadDataAgent:${conversationId}] Creating temp view to extract schema for naming: ${link}`,
+                    );
+
+                    await gsheetToDuckdb({
+                      dbPath,
+                      sharedLink: link,
+                      viewName: tempViewName,
+                    });
+
+                    // Step 2: Extract schema from temp view (for semantic naming only)
+                    schema = await extractSchema({
+                      dbPath,
+                      viewName: tempViewName,
+                      allowTempTables: true,
+                    });
+
+                    // Step 3: Generate semantic view name
+                    const existingNames = existing.map((rec) => rec.viewName);
+                    finalViewName = generateSemanticViewName(
+                      schema,
+                      existingNames,
+                    );
+
+                    // Step 4: Create final view directly from source (MATCHES NEW ARCHITECTURE)
+                    await gsheetToDuckdb({
+                      dbPath,
+                      sharedLink: link,
+                      viewName: finalViewName,
+                    });
+
+                    // Step 5: Verify final view was created (MATCHES NEW ARCHITECTURE)
+                    const { DuckDBInstance } = await import('@duckdb/node-api');
+                    const verifyInstance = await DuckDBInstance.create(dbPath);
+                    const verifyConn = await verifyInstance.connect();
+                    try {
+                      const escapedFinalName = finalViewName.replace(/"/g, '""');
+                      const verifyReader = await verifyConn.runAndReadAll(
+                        `SELECT 1 FROM "${escapedFinalName}" LIMIT 1`,
+                      );
+                      await verifyReader.readAll();
+                    } catch (error) {
+                      const errorMsg =
+                        error instanceof Error ? error.message : String(error);
+                      throw new Error(
+                        `Failed to create or verify view "${finalViewName}": ${errorMsg}`,
+                      );
+                    } finally {
+                      verifyConn.closeSync();
+                      verifyInstance.closeSync();
+                    }
+
+                    // Step 6: Extract schema from final view using new connection (MATCHES NEW ARCHITECTURE)
+                    schema = await extractSchema({
+                      dbPath,
+                      viewName: finalViewName,
+                    });
+
+                    await dropTable(dbPath, tempViewName);
+
+                    const { record } = await registerSheetView(
+                      context,
+                      link,
+                      finalViewName,
+                      finalViewName,
+                      schema,
+                    );
+
+                    return {
+                      viewName: record.viewName,
+                      displayName: record.displayName,
+                      sharedLink: record.sharedLink,
+                    };
+                  } catch (error) {
+                    // Cleanup temp view on error
+                    try {
+                      await dropTable(dbPath, tempViewName);
+                    } catch {
+                      // Ignore cleanup errors
+                    }
+                    throw error;
+                  }
+                },
+                {
+                  maxRetries: 3,
+                  retryDelay: 100,
+                  shouldRetry: (error) => {
+                    const msg = error.message;
+                    return (
+                      msg.includes('timeout') ||
+                      msg.includes('network') ||
+                      msg.includes('fetch') ||
+                      msg.includes('Catalog Error')
+                    );
+                  },
+                },
+              );
+
+              results.push({
+                success: true,
+                viewName: result.viewName,
+                displayName: result.displayName,
+                link,
+              });
+            } catch (error) {
+              const errorMsg =
+                error instanceof Error
+                  ? formatViewCreationError(error, link)
+                  : String(error);
+              results.push({
+                success: false,
+                error: errorMsg,
+                link,
+              });
+            }
+          }
+
+          const successful = results.filter((r) => r.success);
+          const failed = results.filter((r) => !r.success);
+
+          if (successful.length === 0) {
+            throw new Error(
+              `Failed to create views from Google Sheets:\n${failed
+                .map((f) => `- ${f.link}: ${f.error}`)
+                .join('\n')}`,
+            );
+          }
+
+          const response: Array<{
+            viewName: string;
+            displayName: string;
+            link: string;
+          }> = successful.map((s) => ({
+            viewName: s.viewName!,
+            displayName: s.displayName || s.viewName!,
+            link: s.link,
+          }));
+
+          if (failed.length > 0) {
+            return {
+              success: true,
+              views: response,
+              warnings: failed.map((f) => ({
+                link: f.link,
+                error: f.error,
+              })),
+              message: `Successfully created ${successful.length} view(s), but ${failed.length} failed.`,
+            };
+          }
+
+          return {
+            success: true,
+            views: response,
+            message: `Successfully created ${successful.length} view(s) from Google Sheet(s).`,
+          };
+        },
+      }),
       runQuery: tool({
         description:
           'Run a SQL query against the DuckDB instance (views from file-based datasources or attached database tables). Query views by name (e.g., "customers") or attached tables by full path (e.g., ds_x.public.users). DuckDB enables federated queries across PostgreSQL, MySQL, Google Sheets, and other datasources.',
@@ -473,6 +738,103 @@ export const readDataAgent = async (
           return {
             result: result,
           };
+        },
+      }),
+      listAvailableSheets: tool({
+        description:
+          'List all available views and tables in the database. Use this when the user asks which sheets are available, or when you need to remind the user which data sources are available.',
+        inputSchema: z.object({}),
+        execute: async () => {
+          const workspace = getWorkspace();
+          if (!workspace) {
+            throw new Error('WORKSPACE environment variable is not set');
+          }
+          const { join } = await import('node:path');
+          const dbPath = join(workspace, conversationId, 'database.db');
+
+          const result = await listAvailableSheets({ dbPath });
+          return {
+            sheets: result.sheets,
+            message: result.message,
+          };
+        },
+      }),
+      viewSheet: tool({
+        description:
+          'View/display the contents of a view/table. This is a convenient way to quickly see what data is in a view without writing a SQL query. Shows the first 50 rows by default.',
+        inputSchema: z.object({
+          sheetName: z
+            .string()
+            .optional()
+            .describe('Name of the view/table to view (defaults to first available)'),
+          limit: z
+            .number()
+            .optional()
+            .describe('Maximum number of rows to display (defaults to 50)'),
+        }),
+        execute: async ({ sheetName, limit }) => {
+          const workspace = getWorkspace();
+          if (!workspace) {
+            throw new Error('WORKSPACE environment variable is not set');
+          }
+          const { join } = await import('node:path');
+          const dbPath = join(workspace, conversationId, 'database.db');
+
+          const result = await viewSheet({
+            dbPath,
+            sheetName,
+            limit,
+          });
+          return {
+            sheetName: result.sheetName,
+            totalRows: result.totalRows,
+            displayedRows: result.displayedRows,
+            columns: result.columns,
+            rows: result.rows,
+            message: result.message,
+          };
+        },
+      }),
+      selectChartType: tool({
+        description:
+          'Select the best chart type (bar, line, or pie) for visualizing the query results. This should be called before generateChart.',
+        inputSchema: z.object({
+          queryResults: z.object({
+            rows: z.array(z.record(z.unknown())),
+            columns: z.array(z.string()),
+          }),
+          sqlQuery: z.string(),
+          userInput: z.string(),
+        }),
+        execute: async ({ queryResults, sqlQuery, userInput }) => {
+          const selection = await selectChartType(
+            queryResults,
+            sqlQuery,
+            userInput,
+          );
+          return selection;
+        },
+      }),
+      generateChart: tool({
+        description:
+          'Generate chart configuration JSON for the selected chart type. Call selectChartType first to determine the chart type.',
+        inputSchema: z.object({
+          chartType: z.enum(['bar', 'line', 'pie']),
+          queryResults: z.object({
+            rows: z.array(z.record(z.unknown())),
+            columns: z.array(z.string()),
+          }),
+          sqlQuery: z.string(),
+          userInput: z.string(),
+        }),
+        execute: async ({ chartType, queryResults, sqlQuery, userInput }) => {
+          const chartConfig = await generateChart({
+            queryResults,
+            sqlQuery,
+            userInput,
+            chartType, // Pass the pre-selected chart type
+          });
+          return chartConfig;
         },
       }),
     },

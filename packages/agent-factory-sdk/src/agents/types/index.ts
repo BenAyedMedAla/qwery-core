@@ -343,6 +343,7 @@ const intentNames = INTENTS_LIST.map((intent) => intent.name) as [
 export const IntentSchema = z.object({
   intent: z.enum(intentNames),
   complexity: z.enum(['simple', 'medium', 'complex']),
+  needsChart: z.boolean().default(false),
 });
 
 export type Intent = z.infer<typeof IntentSchema>;

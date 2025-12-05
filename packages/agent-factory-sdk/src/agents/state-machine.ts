@@ -64,7 +64,6 @@ export const createStateMachine = (
     },
   });
   return defaultSetup.createMachine({
-    /** @xstate-layout N4IgpgJg5mDOIC5QDMCGBjALgewE4E8BaVGAO0wDoAbbVCAYW3LAA9MBiCJsCgS1IBu2ANY8AMgHkAggBEA+vQkA5ACoBRABoqA2gAYAuolAAHbLF6ZeTIyBaIALLoBsFAIwAOAOz2AnACYAZgBWJ3d3e3sAgBoQfEQ-V1cKXx8fT1cg-1cA3SD3AF98mLQsPCISMHJqWgYmTFYOMFxcPApjKlRMZDwAWwpJWQVldS09QyQQU3NLawm7BD8ne08KIN1PTwD7JyDXJZ8YuIQc+wofIJzPH2XdAI2CopASnAJiMkpeCCowdgBVAGU1AAlOQASSUAAVfjoDDYphYrKQbPMgn5Doh3EkUmlPIsnE5XAkHsUMC9yu8+F8fv8VBIIWM4WYEbNQPMAokVuc-O5Ak5rn5buiEPZMRQnH5HM5dAKvOLPIUSaVXhUqrgAK6kUj8KB-QEg8FQmHjExMmZIuaIQl81YBHy3HJBdJOXT2IUBPw+Ci4na6RKJAJODYKp6kspvSqUdWa7XsGl0hkTeFm5HxJYrNYbLY7Pa+IXufxi3T+cKRbI+JbB55hlWRjVa0hQCgQMD1LCg5hVTr1HrGSwNzjcPiCEQ8ADiahUYNUalUCZN00RKYQrmlnvsRM8volPjC0ViiEdns84p87O23PdAUroeVFKj9cbzdbmHb9U7mG7vZjXFIPH4QlEChx0ncF1FnVxjUmU1FwtZdbjXDct18Xc80DCgAh5dIAnZW4+Sca8lXJCMKHvbUmxbMA2w7SguzAHs+x1H8-2HQDgKnMCdD8SCkxg1lLRdBCPE3QlkPcPcjgyFcKEWIJfD8IJZK8c4CLJcNVTrMin0ol9qIoWj6JjJoWlwNoOi6XogIndiZyNRkFxZWwD3SdCeRLHJTycO4hVcK4AmSexdguHyNkcPwVOrO8NIbcjn1fYj9K-fsjNadpOm6XA+jY0CbO0CC7OZc0+IWNNVnWTZtl2fZvOlPz3EyRZEgiVEMnC29iNI6KtKot8aI-OjEp1FhYEwToeFQZB6lwAAKHJdDmgBKdgqza9To06ijuvivqDIbOcoPswrHIQR0kgw7kIncgMvP3Zc+U9VIBQCj1rlPVqiNWh8Yu0uLVRbAgYyGkb6j0iamim3A-vwGQwA6fBFuW97azWx8Np0nqSMh7U9p4hz5lxT1uTtdw+XzAKFO8nY-GSfwXX2SUr0eBG1KRz7YDVHoelQXBeAALzAH6OCYocAJ4f5fgAWXFqQgVBAAtNRrNnWFE2g3HLXSXQvR2PIi3FW4giFTIVh885UnddI1iCN7mZIqLGzZjmud5-nqPYZKTNS8yMooMXJeluWFeypXuNVw75kWZZSszCqcwOG6AtOc4TguMJpVCa2a1t5GKCgCGW2-Qd-xHH2pDEX41Gx0OlxzU5MXkgLPAUglxTzUVPL8TdcVyW1PGJENCJtjrG1zsB86S5oUrM9K+n+Uvy8rg6lwj9MyqzSrcxuzY12cDJ3XxDv7AzyLs4hugZE6VAB1-ChhtGigmczoeMbPi+F4KpeA01-NnHOjDcicbyFw-ISkepuHwhI8hH3anbZ+EBz4jTaC0dAcBYBAjAAARzVHAD4LEC7XyLoBIEahBgyCkCoKQb9kywQ8NyNwIRuS3DKv4Tw3kHQUF0HVVyzhNzuitozG8iMs6fVPnAi+iDsDINgKgjBWDhrCxEIZCeHsp4WSISQshFDlbznftQ1ydDxTuEYRsZhFN3RnAChkXI6wI4M0VKpR+MCRHwNQOIyR0jMHYPkcIRRxlTJpVUcQ+QpDyG5RDovXRtCMgGKMVcDu3lfBJAei6M6wQO5QI+mRJxYjjBIJQWgjxciCEA1vsDcak0pqEjmgtJaAjB6OLAC-BBOSJF5JkZ4opu0tH7R0UVGh7h9EMMuLElhN0yz9JTqeTIT0rjyn4QPBxJ8GmiKabkqR+TZGRkxv2QGd8ylgwhpgAg0NYbw1qQs4RSznGuNaQUzZhz8BYy6TjMOlo0iejqtcDksk7jrEAXVfygUfK+hCmFOZ9jj6s0OQ0noMYABi4JQT-AABJyBpGo8WlDeJHWXlHcq2Yqo3WuH5Fc-g7h1WPBVQojxSDYGbPACYD93j5SoUVQgIyjiEHwmCiKxEaB0EYMwNgzKsUojRDdPwEppIyTuN4RIaRIjpI+FSYVatji3FOAFHIWw-TSkFPHHkbgJTOAiBrW02FFVCO1Cql5wpXBChFEkQI5wXSyUCPmLYFqn5dTRhGa1S58yAKWGcGmfIJVbyLJ6mB3qBZ6W2gNP11DroSUbgTLYTq9hXB2JG7O0bdIHP+g2BNRUwhU1PI3PYtwMipDtaM3EGrQjinkvXcBh9uUrRZmRB2nNuZ8wFkWo62RXCnGPCEDwOFUjlkNqEL0toHWGLtL6PhdieUZOiiPMeUB+3zGyJsM4zpiyblkiEdwqEggUA+dyJuER1g+GzRcxpqAt2WmCKcRdzpHS+CuLJby2RNYcLyJYsSSwl393BdAxZD7rlrLacNJ9y5QrsKibkbwbzv2jISOmclpK1jyVxHezJlzsmrPcRsrxVqVbhN6QFP9SGP2oddKM50VMOFiRdBKossr8PRSySslp0HbkY3ueR7RLLsXZD8hmcIN7syRApr4dCGF3Trm5IGF0XHGw8Zcc0tx6zPHoGwD2b49QIBwYSNhKOUnM27Fk6M3h57CS2l9LkOV6nYFXO0zc0jaBeDfBMxRnpYnzOSccFZod4lLSW3YbsT5pNnRDtc5pigAAjDAwhc7YA1BANQpAAAWqBSDIJ6L6-zont0Ibfchz95wGPJpFOhHc8kxJ1V2HsBLhGEEpfQGllomXst5YK3RYinxvhwaHWsRDIRKv0e8mJM9+YeSfOlCp29bbBFP2GqfGFhaSsiviMsM9CltjgOlCuSI7LEB2j8vu86pZbQVlWzbYa2BjDGEgHB90CR6u+gDOcFDQ77WGPPVvIm7pywRCpfkIAA */
     id: 'factory-agent',
     context: {
       model: model,
@@ -76,6 +75,7 @@ export const createStateMachine = (
       intent: {
         intent: 'other',
         complexity: 'simple',
+        needsChart: false,
       },
       error: undefined,
       retryCount: 0,
@@ -231,7 +231,7 @@ export const createStateMachine = (
                 model: context.model,
               }),
               onDone: {
-                target: 'streaming',
+                target: '#factory-agent.idle',
                 actions: assign({
                   streamResult: ({ event }) => event.output,
                 }),
@@ -265,7 +265,7 @@ export const createStateMachine = (
                 model: context.model,
               }),
               onDone: {
-                target: 'streaming',
+                target: '#factory-agent.idle',
                 actions: assign({
                   streamResult: ({ event }) => event.output,
                 }),
@@ -297,7 +297,6 @@ export const createStateMachine = (
                       src: 'readDataAgentActor',
                       id: 'READ_DATA',
                       input: ({ context }: { context: AgentContext }) => ({
-                        inputMessage: context.inputMessage,
                         conversationId: context.conversationId,
                         previousMessages: context.previousMessages,
                         model: context.model,
@@ -364,20 +363,6 @@ export const createStateMachine = (
                   },
                 },
               },
-              // NEW: Background enhancement (runs in parallel)
-              backgroundEnhancement: {
-                initial: 'idle',
-                states: {
-                  idle: {
-                    // Background enhancement is handled by enhanceBusinessContextInBackground
-                    // which is already non-blocking, so this state just tracks it
-                    type: 'final',
-                  },
-                },
-              },
-            },
-            onDone: {
-              target: 'streaming',
             },
           },
           systemInfo: {
@@ -388,7 +373,7 @@ export const createStateMachine = (
                 inputMessage: context.inputMessage,
               }),
               onDone: {
-                target: 'streaming',
+                target: '#factory-agent.idle',
                 actions: assign({
                   streamResult: ({ event }) => event.output,
                 }),
@@ -406,13 +391,6 @@ export const createStateMachine = (
                   },
                   streamResult: undefined,
                 }),
-              },
-            },
-          },
-          streaming: {
-            on: {
-              FINISH_STREAM: {
-                target: '#factory-agent.idle',
               },
             },
           },
