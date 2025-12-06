@@ -68,10 +68,20 @@
       "react-is": "19.0.0"
     },
     "onlyBuiltDependencies": [
+      "@duckdb/node-api",
       "@sentry/cli",
       "@tailwindcss/oxide",
       "better-sqlite3",
-      "msw"
+      "core-js",
+      "core-js-pure",
+      "electron",
+      "esbuild",
+      "msw",
+      "onnxruntime-node",
+      "protobufjs",
+      "sentry",
+      "sharp",
+      "unrs-resolver"
     ]
   },
   "devDependencies": {
