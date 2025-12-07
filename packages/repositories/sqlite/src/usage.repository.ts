@@ -124,6 +124,24 @@ export class UsageRepository extends IUsageRepository {
     return rows.map((row) => this.deserialize(row));
   }
 
+  async findByConversationSlug(conversationSlug: string): Promise<Usage[]> {
+    await this.init();
+    // First, get the conversation ID from the slug
+    const conversationStmt = this.db.prepare(
+      'SELECT id FROM conversations WHERE slug = ?',
+    );
+    const conversation = conversationStmt.get(conversationSlug) as
+      | { id: string }
+      | undefined;
+
+    if (!conversation) {
+      return [];
+    }
+
+    // Then find usage by conversation ID
+    return this.findByConversationId(conversation.id);
+  }
+
   async create(entity: Usage): Promise<Usage> {
     await this.init();
 

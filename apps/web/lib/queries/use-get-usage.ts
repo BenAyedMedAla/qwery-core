@@ -20,6 +20,7 @@ export function useGetUsage(
     usageRepository,
     conversationRepository,
   );
+
   return useQuery({
     queryKey: getUsageKey(conversationSlug, userId),
     queryFn: () => useCase.execute({ conversationSlug, userId }),

@@ -183,6 +183,68 @@ export class UsageRepository extends IUsageRepository {
     });
   }
 
+  async findByConversationSlug(conversationSlug: string): Promise<Usage[]> {
+    // First, get the conversation ID from the conversations database
+    const CONVERSATIONS_DB_NAME = 'qwery-conversations';
+    const CONVERSATIONS_STORE_NAME = 'conversations';
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(CONVERSATIONS_DB_NAME, 1);
+
+      request.onerror = () => {
+        reject(
+          new Error(
+            `Failed to open conversations database: ${request.error?.message}`,
+          ),
+        );
+      };
+
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(CONVERSATIONS_STORE_NAME)) {
+          resolve([]);
+          return;
+        }
+
+        const transaction = db.transaction(
+          [CONVERSATIONS_STORE_NAME],
+          'readonly',
+        );
+        const store = transaction.objectStore(CONVERSATIONS_STORE_NAME);
+        const index = store.index('slug');
+        const getRequest = index.get(conversationSlug);
+
+        getRequest.onerror = () => {
+          reject(
+            new Error(
+              `Failed to fetch conversation: ${getRequest.error?.message}`,
+            ),
+          );
+        };
+
+        getRequest.onsuccess = () => {
+          const conversation = getRequest.result as { id: string } | undefined;
+          db.close();
+
+          if (!conversation) {
+            resolve([]);
+            return;
+          }
+
+          // Then find usage by conversation ID
+          this.findByConversationId(conversation.id)
+            .then(resolve)
+            .catch(reject);
+        };
+      };
+
+      request.onupgradeneeded = () => {
+        // Database doesn't exist or needs upgrade, conversation not found
+        resolve([]);
+      };
+    });
+  }
+
   async create(entity: Usage): Promise<Usage> {
     await this.init();
 

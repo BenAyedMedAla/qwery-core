@@ -2,11 +2,15 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Conversation } from '@qwery/domain/entities';
 import { IConversationRepository } from '@qwery/domain/repositories';
-import { CreateConversationService } from '@qwery/domain/services';
+import {
+  CreateConversationService,
+  UpdateConversationService,
+} from '@qwery/domain/services';
 import { getConversationsKey } from '~/lib/queries/use-get-conversations';
 import {
   ConversationOutput,
   CreateConversationInput,
+  UpdateConversationInput,
 } from '@qwery/domain/usecases';
 
 export function getConversationKey(slug: string) {
@@ -38,5 +42,28 @@ export function useConversation(
       onSuccess(conversation as unknown as Conversation);
     },
     onError,
+  });
+}
+
+export function useUpdateConversation(
+  conversationRepository: IConversationRepository,
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (conversationDTO: UpdateConversationInput) => {
+      const updateConversationService = new UpdateConversationService(
+        conversationRepository,
+      );
+      return await updateConversationService.execute(conversationDTO);
+    },
+    onSuccess: (conversation: ConversationOutput) => {
+      queryClient.invalidateQueries({
+        queryKey: getConversationKey(conversation.slug),
+      });
+      queryClient.invalidateQueries({
+        queryKey: getConversationsKey(),
+      });
+    },
   });
 }

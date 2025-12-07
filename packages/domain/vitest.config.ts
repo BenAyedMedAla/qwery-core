@@ -10,6 +10,7 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 60000,
     hookTimeout: 120000, // 2 minutes for container startup
+    setupFiles: ['./setupTests.ts'],
   },
   resolve: {
     alias: {

@@ -46,6 +46,14 @@ export class UsageRepository extends IUsageRepository {
       .sort((a, b) => b.id - a.id);
   }
 
+  async findByConversationSlug(_conversationSlug: string): Promise<Usage[]> {
+    // Memory repository doesn't have access to conversation repository
+    // This method requires conversation lookup which is not available in memory implementation
+    // For testing purposes, return empty array
+    // In real usage, this should be handled by the service layer
+    return [];
+  }
+
   async create(entity: Usage): Promise<Usage> {
     // Generate ID if not provided
     const entityWithId = {

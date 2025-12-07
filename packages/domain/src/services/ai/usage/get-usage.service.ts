@@ -1,5 +1,3 @@
-import { Code } from '../../../common/code';
-import { DomainException } from '../../../exceptions';
 import {
   IConversationRepository,
   IUsageRepository,
@@ -22,19 +20,8 @@ export class GetUsageByConversationSlugService
     conversationSlug: string;
     userId: string;
   }): Promise<UsageOutput[]> {
-    const conversation =
-      await this.conversationRepository.findBySlug(conversationSlug);
-    if (!conversation) {
-      throw DomainException.new({
-        code: Code.CONVERSATION_NOT_FOUND_ERROR,
-        overrideMessage: `Conversation with slug '${conversationSlug}' not found`,
-        data: { conversationSlug },
-      });
-    }
-
-    const usageRecords = await this.usageRepository.findByConversationId(
-      conversation.id,
-    );
+    const usageRecords =
+      await this.usageRepository.findByConversationSlug(conversationSlug);
 
     return usageRecords.map((usage) => UsageOutput.new(usage));
   }

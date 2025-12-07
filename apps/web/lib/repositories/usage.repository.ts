@@ -26,6 +26,14 @@ export class UsageRepository extends IUsageRepository {
     return result || [];
   }
 
+  async findByConversationSlug(conversationSlug: string): Promise<Usage[]> {
+    const result = await apiGet<Usage[]>(
+      `/usage?conversationSlug=${conversationSlug}`,
+      true,
+    );
+    return result || [];
+  }
+
   async create(entity: Usage): Promise<Usage> {
     // Extract CreateUsageInput from Usage entity
     // The service will set conversationId, projectId, organizationId from conversationSlug

@@ -31,6 +31,7 @@ describe('OrganizationsPage', () => {
     findByProjectId: vi.fn().mockResolvedValue([]),
     findByTaskId: vi.fn().mockResolvedValue([]),
     findByConversationId: vi.fn().mockResolvedValue([]),
+    findByConversationSlug: vi.fn().mockResolvedValue([]),
   };
 
   const mockWorkspace = {

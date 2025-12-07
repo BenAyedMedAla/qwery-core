@@ -22,6 +22,7 @@ import {
 } from '../../ai-elements/prompt-input';
 import { ChatStatus } from 'ai';
 import QweryContext, { QweryContextProps } from './context';
+import { DatasourceSelector, type DatasourceItem } from './datasource-selector';
 
 export interface QweryPromptInputProps {
   onSubmit: (message: PromptInputMessage) => void;
@@ -36,15 +37,21 @@ export interface QweryPromptInputProps {
   stopDisabled?: boolean;
   attachmentsCount?: number;
   usage?: QweryContextProps;
+  // Datasource selector props
+  selectedDatasources?: string[];
+  onDatasourceSelectionChange?: (datasourceIds: string[]) => void;
+  datasources?: DatasourceItem[];
+  pluginLogoMap?: Map<string, string>;
+  datasourcesLoading?: boolean;
 }
 
 /* eslint-disable react-hooks/refs -- React Compiler false positive: props are not refs */
-export default function QweryPromptInput(props: QweryPromptInputProps) {
+function PromptInputContent(props: QweryPromptInputProps) {
   const attachments = usePromptInputAttachments();
   const attachmentsCount = props.attachmentsCount ?? attachments.files.length;
 
   return (
-    <PromptInput onSubmit={props.onSubmit} className="mt-4" globalDrop multiple>
+    <>
       <PromptInputHeader>
         <PromptInputAttachments>
           {(attachment) => <PromptInputAttachment data={attachment} />}
@@ -95,6 +102,17 @@ export default function QweryPromptInput(props: QweryPromptInputProps) {
               <PromptInputActionAddAttachments />
             </PromptInputActionMenuContent>
           </PromptInputActionMenu>
+          {props.datasources &&
+            props.onDatasourceSelectionChange &&
+            props.pluginLogoMap && (
+              <DatasourceSelector
+                selectedDatasources={props.selectedDatasources ?? []}
+                onSelectionChange={props.onDatasourceSelectionChange}
+                datasources={props.datasources}
+                pluginLogoMap={props.pluginLogoMap}
+                isLoading={props.datasourcesLoading}
+              />
+            )}
           <PromptInputSelect
             onValueChange={(value) => {
               props.setModel(value);
@@ -145,6 +163,14 @@ export default function QweryPromptInput(props: QweryPromptInputProps) {
           }}
         />
       </PromptInputFooter>
+    </>
+  );
+}
+
+export default function QweryPromptInput(props: QweryPromptInputProps) {
+  return (
+    <PromptInput onSubmit={props.onSubmit} className="mt-4" globalDrop multiple>
+      <PromptInputContent {...props} />
     </PromptInput>
   );
 }

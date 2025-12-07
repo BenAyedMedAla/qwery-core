@@ -1,6 +1,6 @@
 import { Entity } from '../common/entity';
 import { z } from 'zod';
-import { Exclude, Expose, plainToClass } from 'class-transformer';
+import { Exclude, Expose, plainToClass, Type } from 'class-transformer';
 import { generateIdentity } from '../utils/identity.generator';
 import { CreateProjectInput, UpdateProjectInput } from '../usecases';
 
@@ -57,8 +57,10 @@ export class ProjectEntity extends Entity<string, typeof ProjectSchema> {
   @Expose()
   public status!: string;
   @Expose()
+  @Type(() => Date)
   public createdAt!: Date;
   @Expose()
+  @Type(() => Date)
   public updatedAt!: Date;
   @Expose()
   public createdBy!: string;

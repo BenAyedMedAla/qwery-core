@@ -2,7 +2,9 @@ import { createContext, useContext, useMemo } from 'react';
 
 import type { IDatasourceRepository } from '@qwery/domain/repositories';
 import { GetDatasourceService } from '@qwery/domain/services';
-import { getExtension } from '@qwery/extensions-sdk';
+import { DatasourceKind } from '@qwery/domain/entities';
+import { getDiscoveredDatasource, getExtension } from '@qwery/extensions-sdk';
+import { apiPost } from '~/lib/repositories/api-client';
 
 interface AgentsContextValue {
   runQueryWithAgent: (
@@ -48,25 +50,75 @@ export function AgentsProvider({
         throw new Error('Datasource not found');
       }
 
-      const extension = await getExtension(datasource.datasource_provider);
-      if (!extension) {
-        throw new Error('Extension not found');
+      if (!datasource.datasource_provider) {
+        throw new Error('Datasource provider is required');
       }
 
-      const driverStorageKey =
-        (datasource.config as { storageKey?: string })?.storageKey ??
-        datasource.id ??
-        datasource.slug ??
-        datasource.name;
-      const driver = await extension.getDriver(
-        driverStorageKey,
-        datasource.config,
+      // Get driver metadata to check runtime
+      const dsMeta = await getDiscoveredDatasource(
+        datasource.datasource_provider,
       );
+      if (!dsMeta) {
+        throw new Error('Datasource metadata not found');
+      }
+
+      const driver =
+        dsMeta.drivers.find(
+          (d) =>
+            d.id === (datasource.config as { driverId?: string })?.driverId,
+        ) ?? dsMeta.drivers[0];
+
       if (!driver) {
         throw new Error('Driver not found');
       }
 
-      const metadata = await driver.metadata(datasource.config);
+      const runtime = driver.runtime ?? 'browser';
+
+      let metadata;
+
+      // Handle browser drivers (embedded datasources) - client-side
+      if (runtime === 'browser') {
+        if (datasource.datasource_kind !== DatasourceKind.EMBEDDED) {
+          throw new Error('Browser drivers require embedded datasources');
+        }
+
+        const extension = await getExtension(datasource.datasource_provider);
+        if (!extension) {
+          throw new Error('Extension not found');
+        }
+
+        const driverStorageKey =
+          (datasource.config as { storageKey?: string })?.storageKey ??
+          datasource.id ??
+          datasource.slug ??
+          datasource.name;
+        const driverInstance = await extension.getDriver(
+          driverStorageKey,
+          datasource.config,
+        );
+        if (!driverInstance) {
+          throw new Error('Driver not found');
+        }
+
+        metadata = await driverInstance.metadata(datasource.config);
+      } else {
+        // Handle node drivers (remote datasources) via API
+        const response = await apiPost<{
+          success: boolean;
+          data: typeof metadata;
+        }>('/driver/command', {
+          action: 'metadata',
+          datasourceProvider: datasource.datasource_provider,
+          driverId: driver.id,
+          config: datasource.config,
+        });
+        metadata = response.data;
+      }
+
+      if (!metadata) {
+        throw new Error('Metadata not available');
+      }
+
       const schema = metadata.tables
         .map(
           (table) =>

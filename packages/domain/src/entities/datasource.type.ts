@@ -1,6 +1,6 @@
 import { Entity } from '../common/entity';
 import { z } from 'zod';
-import { Exclude, Expose, plainToClass } from 'class-transformer';
+import { Exclude, Expose, plainToClass, Type } from 'class-transformer';
 import { generateIdentity } from '../utils/identity.generator';
 import { CreateDatasourceInput, UpdateDatasourceInput } from '../usecases';
 
@@ -62,8 +62,10 @@ export class DatasourceEntity extends Entity<string, typeof DatasourceSchema> {
   @Expose()
   public config!: Record<string, unknown>;
   @Expose()
+  @Type(() => Date)
   public createdAt!: Date;
   @Expose()
+  @Type(() => Date)
   public updatedAt!: Date;
   @Expose()
   public createdBy!: string;

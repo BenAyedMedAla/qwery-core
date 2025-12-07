@@ -5,4 +5,8 @@ export abstract class IUsageRepository extends RepositoryPort<Usage, string> {
   public abstract findByConversationId(
     conversationId: string,
   ): Promise<Usage[]>;
+
+  public abstract findByConversationSlug(
+    conversationSlug: string,
+  ): Promise<Usage[]>;
 }

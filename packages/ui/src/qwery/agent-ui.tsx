@@ -52,7 +52,7 @@ import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { BotAvatar } from './bot-avatar';
 import { Sparkles } from 'lucide-react';
-import { QweryPromptInput } from './ai';
+import { QweryPromptInput, type DatasourceItem } from './ai';
 import { QweryContextProps } from './ai/context';
 
 export interface QweryAgentUIProps {
@@ -62,11 +62,28 @@ export interface QweryAgentUIProps {
   onOpen?: () => void;
   usage?: QweryContextProps;
   emitFinish?: () => void;
+  // Datasource selector props
+  datasources?: DatasourceItem[];
+  selectedDatasources?: string[];
+  onDatasourceSelectionChange?: (datasourceIds: string[]) => void;
+  pluginLogoMap?: Map<string, string>;
+  datasourcesLoading?: boolean;
 }
 
 export default function QweryAgentUI(props: QweryAgentUIProps) {
-  const { initialMessages, transport, models, onOpen, usage, emitFinish } =
-    props;
+  const {
+    initialMessages,
+    transport,
+    models,
+    onOpen,
+    usage,
+    emitFinish,
+    datasources,
+    selectedDatasources,
+    onDatasourceSelectionChange,
+    pluginLogoMap,
+    datasourcesLoading,
+  } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const hasFocusedRef = useRef(false);
 
@@ -539,6 +556,11 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
             messages={messages}
             models={models}
             usage={usage}
+            datasources={datasources}
+            selectedDatasources={selectedDatasources}
+            onDatasourceSelectionChange={onDatasourceSelectionChange}
+            pluginLogoMap={pluginLogoMap}
+            datasourcesLoading={datasourcesLoading}
           />
         </div>
       </div>
@@ -557,6 +579,11 @@ function PromptInputInner({
   messages,
   models,
   usage,
+  datasources,
+  selectedDatasources,
+  onDatasourceSelectionChange,
+  pluginLogoMap,
+  datasourcesLoading,
 }: {
   sendMessage: ReturnType<typeof useChat>['sendMessage'];
   state: { input: string; model: string; webSearch: boolean };
@@ -570,6 +597,11 @@ function PromptInputInner({
   messages: ReturnType<typeof useChat>['messages'];
   models: { name: string; value: string }[];
   usage?: QweryContextProps;
+  datasources?: DatasourceItem[];
+  selectedDatasources?: string[];
+  onDatasourceSelectionChange?: (datasourceIds: string[]) => void;
+  pluginLogoMap?: Map<string, string>;
+  datasourcesLoading?: boolean;
 }) {
   const attachments = usePromptInputAttachments();
   const controller = usePromptInputController();
@@ -644,6 +676,11 @@ function PromptInputInner({
       stopDisabled={isAborting}
       attachmentsCount={attachments.files.length}
       usage={usage}
+      datasources={datasources}
+      selectedDatasources={selectedDatasources}
+      onDatasourceSelectionChange={onDatasourceSelectionChange}
+      pluginLogoMap={pluginLogoMap}
+      datasourcesLoading={datasourcesLoading}
     />
   );
 }

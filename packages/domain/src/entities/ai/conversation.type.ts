@@ -1,6 +1,12 @@
 import { Entity } from '../../common/entity';
 import { z } from 'zod';
-import { Exclude, Expose, plainToClass } from 'class-transformer';
+import {
+  Exclude,
+  Expose,
+  plainToClass,
+  instanceToPlain,
+  Type,
+} from 'class-transformer';
 import { generateIdentity } from '../../utils/identity.generator';
 import {
   CreateConversationInput,
@@ -55,8 +61,10 @@ export class ConversationEntity extends Entity<
   @Expose()
   public taskId!: string;
   @Expose()
+  @Type(() => Date)
   public createdAt!: Date;
   @Expose()
+  @Type(() => Date)
   public updatedAt!: Date;
   @Expose()
   public createdBy!: string;
@@ -104,9 +112,13 @@ export class ConversationEntity extends Entity<
       updatedBy: conversationDTO.updatedBy,
     };
 
+    const transformed = plainToClass(ConversationEntity, updatedConversation);
+
+    const plainData = instanceToPlain(transformed) as Conversation;
+
     return plainToClass(
       ConversationEntity,
-      ConversationSchema.parse(updatedConversation),
+      ConversationSchema.parse(plainData),
     );
   }
 }
