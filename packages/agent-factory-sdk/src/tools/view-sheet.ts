@@ -4,6 +4,8 @@ export interface ViewSheetOptions {
   dbPath: string;
   sheetName?: string;
   limit?: number;
+  datasourceIds?: string[];
+  datasourceRepository?: import('@qwery/domain/repositories').IDatasourceRepository;
 }
 
 export interface ViewSheetResult {
@@ -36,6 +38,8 @@ export const viewSheet = async (
   const countResult = await runQuery({
     dbPath: opts.dbPath,
     query: countQuery,
+    datasourceIds: opts.datasourceIds,
+    datasourceRepository: opts.datasourceRepository,
   });
 
   const firstRow = countResult.rows[0];
@@ -51,6 +55,8 @@ export const viewSheet = async (
   const viewResult = await runQuery({
     dbPath: opts.dbPath,
     query: viewQuery,
+    datasourceIds: opts.datasourceIds,
+    datasourceRepository: opts.datasourceRepository,
   });
 
   const displayedRows = viewResult.rows.length;

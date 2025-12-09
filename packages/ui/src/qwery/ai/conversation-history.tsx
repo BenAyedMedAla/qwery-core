@@ -12,7 +12,7 @@ import {
 import { Button } from '../../shadcn/button';
 import { cn } from '../../lib/utils';
 import {
-  History,
+  MessageSquare,
   MessageCircle,
   Plus,
   Pencil,
@@ -301,7 +301,7 @@ export function ConversationHistory({
         className="cursor-pointer"
         data-test="conversation-history-button"
       >
-        <History className="size-4" />
+        <MessageSquare className="size-4" />
       </Button>
       <CommandDialog open={open} onOpenChange={setOpen}>
         <div className="border-b px-4 py-3">

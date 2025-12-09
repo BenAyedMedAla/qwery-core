@@ -240,7 +240,7 @@ export const createStateMachine = (
                 model: context.model,
               }),
               onDone: {
-                target: '#factory-agent.idle',
+                target: 'streaming',
                 actions: assign({
                   streamResult: ({ event }) => event.output,
                   model: ({ context }) => context.model,
@@ -276,7 +276,7 @@ export const createStateMachine = (
                 model: context.model,
               }),
               onDone: {
-                target: '#factory-agent.idle',
+                target: 'streaming',
                 actions: assign({
                   streamResult: ({ event }) => event.output,
                   model: ({ context }) => context.model,
@@ -309,11 +309,14 @@ export const createStateMachine = (
                     invoke: {
                       src: 'readDataAgentActor',
                       id: 'READ_DATA',
-                      input: ({ context }: { context: AgentContext }) => ({
-                        inputMessage: context.inputMessage,
-                        conversationId: context.conversationId,
-                        previousMessages: context.previousMessages,
-                      }),
+                      input: ({ context }: { context: AgentContext }) => {
+                        return {
+                          conversationId: context.conversationId,
+                          previousMessages: context.previousMessages,
+                          model: context.model,
+                          repositories: repositories,
+                        };
+                      },
                       onDone: {
                         target: 'completed',
                         actions: assign({
@@ -379,6 +382,18 @@ export const createStateMachine = (
                   },
                 },
               },
+              // Background enhancement (runs in parallel)
+              backgroundEnhancement: {
+                initial: 'idle',
+                states: {
+                  idle: {
+                    type: 'final',
+                  },
+                },
+              },
+            },
+            onDone: {
+              target: 'streaming',
             },
           },
           systemInfo: {
@@ -389,7 +404,7 @@ export const createStateMachine = (
                 inputMessage: context.inputMessage,
               }),
               onDone: {
-                target: '#factory-agent.idle',
+                target: 'streaming',
                 actions: assign({
                   streamResult: ({ event }) => event.output,
                   model: ({ context }) => context.model,
@@ -409,6 +424,13 @@ export const createStateMachine = (
                   streamResult: undefined,
                   model: ({ context }) => context.model,
                 }),
+              },
+            },
+          },
+          streaming: {
+            on: {
+              FINISH_STREAM: {
+                target: '#factory-agent.idle',
               },
             },
           },
