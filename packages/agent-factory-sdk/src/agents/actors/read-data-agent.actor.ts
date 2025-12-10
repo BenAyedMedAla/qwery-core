@@ -1642,18 +1642,10 @@ export const readDataAgent = async (
             columns: queryResults.columns,
           };
 
-=======
-      listAvailableSheets: tool({
-        description:
-          'List all available sheets/views in the database. Returns a list of sheet names and their types (view or table).',
-        inputSchema: z.object({}),
-        execute: async () => {
->>>>>>> 94078ce ( AZIZ feat(agent): add sheet management tools to read-data agent)
           const workspace = getWorkspace();
           if (!workspace) {
             throw new Error('WORKSPACE environment variable is not set');
           }
-<<<<<<< HEAD
           const { join } = await import('node:path');
           const fileDir = join(workspace, conversationId);
           const businessContext = await loadBusinessContext(fileDir);
@@ -1666,7 +1658,17 @@ export const readDataAgent = async (
             businessContext,
           });
           return chartConfig;
-=======
+        },
+      }),
+      listAvailableSheets: tool({
+        description:
+          'List all available sheets/views in the database. Returns a list of sheet names and their types (view or table).',
+        inputSchema: z.object({}),
+        execute: async () => {
+          const workspace = getWorkspace();
+          if (!workspace) {
+            throw new Error('WORKSPACE environment variable is not set');
+          }
           const result = await listAvailableSheets({
             conversationId,
             workspace,
@@ -1733,7 +1735,6 @@ export const readDataAgent = async (
             limit,
           });
           return result;
->>>>>>> 94078ce ( AZIZ feat(agent): add sheet management tools to read-data agent)
         },
       }),
       selectChartType: tool({

@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-
 import { IConversationRepository } from '@qwery/domain/repositories';
 import { GetConversationsByProjectIdService } from '@qwery/domain/services';
 
@@ -20,3 +19,4 @@ export function useGetConversationsByProject(
     refetchInterval: 3000,
   });
 }
+
