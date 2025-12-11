@@ -55,7 +55,7 @@ ${getChartGenerationPrompt(chartType)}
 3. Ensure numeric values are properly typed
 4. Handle null/undefined values appropriately
 
-**Configuration:**
+**Configuration (Concise):**
 - colors: Use actual hex color values (e.g., ["#8884d8", "#82ca9d", "#ffc658", "#ff7c7c", "#8dd1e1"])
   - DO NOT use CSS variables like "hsl(var(--chart-1))" as Recharts SVG doesn't support them
   - Use hex colors like "#8884d8" or rgb colors like "rgb(136, 132, 216)"
@@ -113,17 +113,12 @@ Output Format (strict JSON):
   }
 }
 
-**IMPORTANT**: You MUST transform the actual query results data provided above into the chart data format. Use the sample data structure to understand the data types and create the proper transformation. The data array should contain the actual transformed data from ALL query results rows. Each row in the data array should be an object with keys matching the xKey and yKey values you specify in the config.
+**IMPORTANT**: Transform ALL query results rows into chart data format. Use sample data for type inference.
 
-**CRITICAL - Date Handling**: If date fields appear as empty objects, this means DuckDB returned a date type that was not serialized. You MUST:
-1. Use the SQL query to understand what the date field should be (e.g., date_trunc('week', opened_at) should return a date)
-2. Transform empty date objects to proper date strings or timestamps
-3. For date_trunc results, you may need to reconstruct the date from the query context or use a placeholder that will be fixed at render time
-4. If you cannot determine the date value, use a sequential index or row number as a temporary x-axis value
-
-Transform ALL rows from the query results into the chart data format now.
-
-Transform the query results into this format now.
+**CRITICAL - Date Handling**: If date fields are empty objects ({}), DuckDB date serialization failed. You MUST:
+1. Use SQL query context to determine expected date (e.g., date_trunc('week', opened_at) → date)
+2. Transform empty objects to date strings/timestamps
+3. If date cannot be determined, use sequential index as temporary x-axis value
 
 Current date: ${new Date().toISOString()}
 Version: 1.0.0

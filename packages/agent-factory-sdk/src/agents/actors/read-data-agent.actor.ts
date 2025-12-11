@@ -67,20 +67,27 @@ export const readDataAgent = async (
   repositories?: Repositories,
 ) => {
   // Initialize datasources if repositories are provided
+  const agentInitStartTime = performance.now();
   if (repositories) {
     const workspace = getWorkspace();
     if (workspace) {
       try {
         // Get conversation to find datasources
         // Note: conversationId is actually a slug in this context
+        const getConvStartTime = performance.now();
         const getConversationService = new GetConversationBySlugService(
           repositories.conversation,
         );
         const conversation =
           await getConversationService.execute(conversationId);
+        const getConvTime = performance.now() - getConvStartTime;
+        console.log(
+          `[ReadDataAgent] [PERF] Agent init getConversation took ${getConvTime.toFixed(2)}ms`,
+        );
 
         if (conversation?.datasources && conversation.datasources.length > 0) {
           // Initialize all datasources with checked state
+          const initStartTime = performance.now();
           const initResults = await initializeDatasources({
             conversationId,
             datasourceIds: conversation.datasources,
@@ -88,6 +95,10 @@ export const readDataAgent = async (
             workspace,
             checkedDatasourceIds: conversation.datasources, // All are checked initially
           });
+          const initTime = performance.now() - initStartTime;
+          console.log(
+            `[ReadDataAgent] [PERF] initializeDatasources took ${initTime.toFixed(2)}ms (${conversation.datasources.length} datasources)`,
+          );
 
           // Log initialization results for debugging
           const successful = initResults.filter((r) => r.success);
@@ -125,6 +136,12 @@ export const readDataAgent = async (
       }
     }
   }
+  const agentInitTime = performance.now() - agentInitStartTime;
+  if (agentInitTime > 50) {
+    console.log(
+      `[ReadDataAgent] [PERF] Agent initialization took ${agentInitTime.toFixed(2)}ms`,
+    );
+  }
 
   const result = new Agent({
     model: await resolveModel(model),
@@ -156,6 +173,7 @@ export const readDataAgent = async (
           viewNames: z.array(z.string()).optional(),
         }),
         execute: async ({ viewName, viewNames }) => {
+          const startTime = performance.now();
           // If both viewName and viewNames provided, prefer viewNames (array)
           const requestedViews = viewNames?.length
             ? viewNames
@@ -184,20 +202,32 @@ export const readDataAgent = async (
           );
 
           // Get connection from manager
+          const connStartTime = performance.now();
           const conn = await DuckDBInstanceManager.getConnection(
             conversationId,
             workspace,
           );
+          const connTime = performance.now() - connStartTime;
+          console.log(
+            `[ReadDataAgent] [PERF] getConnection took ${connTime.toFixed(2)}ms`,
+          );
 
           // Sync datasources before querying schema
           // If specific views requested, only sync datasources needed for those views
+          const syncStartTime = performance.now();
+          let syncTime = 0;
           if (repositories) {
             try {
+              const getConvStartTime = performance.now();
               const getConversationService = new GetConversationBySlugService(
                 repositories.conversation,
               );
               const conversation =
                 await getConversationService.execute(conversationId);
+              const getConvTime = performance.now() - getConvStartTime;
+              console.log(
+                `[ReadDataAgent] [PERF] getConversation took ${getConvTime.toFixed(2)}ms`,
+              );
               if (conversation?.datasources?.length) {
                 let datasourcesToSync = conversation.datasources;
 
@@ -263,6 +293,7 @@ export const readDataAgent = async (
                   workspace,
                   datasourcesToSync,
                   repositories.datasource,
+                  false, // OPTIMIZATION: Phase 5.2 - Don't detach in getSchema, just attach needed ones
                 );
               }
             } catch (error) {
@@ -272,6 +303,10 @@ export const readDataAgent = async (
               );
             }
           }
+          syncTime = performance.now() - syncStartTime;
+          console.log(
+            `[ReadDataAgent] [PERF] syncDatasources took ${syncTime.toFixed(2)}ms`,
+          );
 
           // Helper to describe a single table/view
           const describeObject = async (
@@ -310,7 +345,28 @@ export const readDataAgent = async (
 
           const collectedSchemas: Map<string, SimpleSchema> = new Map();
 
+          // Check cache for single view requests (OPTIMIZATION: Phase 4.2)
+          if (requestedViews && requestedViews.length === 1) {
+            const singleView = requestedViews[0] ?? '';
+            if (singleView) {
+              const cachedSchema = DuckDBInstanceManager.getCachedSchema(
+                conversationId,
+                workspace,
+                singleView,
+              );
+              if (cachedSchema) {
+                console.log(
+                  `[ReadDataAgent] [PERF] Using cached schema for ${singleView}`,
+                );
+                return cachedSchema;
+              }
+            }
+          }
+
+          const schemaDiscoveryStartTime = performance.now();
+          let schemaDiscoveryTime = 0;
           try {
+            const dbListStartTime = performance.now();
             const dbReader = await conn.runAndReadAll(
               'SELECT name FROM pragma_database_list;',
             );
@@ -319,6 +375,10 @@ export const readDataAgent = async (
               name: string;
             }>;
             const databases = dbRows.map((r) => r.name);
+            const dbListTime = performance.now() - dbListStartTime;
+            console.log(
+              `[ReadDataAgent] [PERF] pragma_database_list took ${dbListTime.toFixed(2)}ms (found ${databases.length} databases)`,
+            );
 
             const targets: Array<{
               db: string;
@@ -332,7 +392,15 @@ export const readDataAgent = async (
             );
             const systemSchemas = getAllSystemSchemas();
 
+            const tableQueryStartTime = performance.now();
+            let totalTablesFound = 0;
             for (const db of databases) {
+              // Skip "database" - it's the DuckDB file name, not an attached database (FIX: Phase 4.3)
+              if (db === 'database') {
+                continue;
+              }
+
+              const dbQueryStartTime = performance.now();
               const escapedDb = db.replace(/"/g, '""');
 
               // For attached foreign databases, query their information_schema directly
@@ -426,6 +494,7 @@ export const readDataAgent = async (
                   schema: row.table_schema || 'main',
                   table: row.table_name,
                 });
+                totalTablesFound++;
               }
 
               // Log summary only if there were skips
@@ -434,54 +503,62 @@ export const readDataAgent = async (
                   `[ReadDataAgent] Filtered ${skippedSystemSchemas} system schemas and ${skippedSystemTables} system tables from ${db}`,
                 );
               }
+              const dbQueryTime = performance.now() - dbQueryStartTime;
+              console.log(
+                `[ReadDataAgent] [PERF] Querying ${db} took ${dbQueryTime.toFixed(2)}ms (found ${targets.filter((t) => t.db === db).length} tables)`,
+              );
             }
+            const tableQueryTime = performance.now() - tableQueryStartTime;
+            console.log(
+              `[ReadDataAgent] [PERF] Total table discovery took ${tableQueryTime.toFixed(2)}ms (found ${totalTablesFound} total tables)`,
+            );
 
             if (requestedViews && requestedViews.length > 0) {
               // Describe only the requested objects
               for (const viewId of requestedViews) {
-              let db = 'main';
-              let schemaName = 'main';
-              let tableName = viewId;
-              if (viewId.includes('.')) {
-                const parts = viewId.split('.').filter(Boolean);
-                if (parts.length === 3) {
-                  // Format: datasourcename.schema.tablename
-                  db = parts[0] ?? db;
-                  schemaName = parts[1] ?? schemaName;
-                  tableName = parts[2] ?? tableName;
-                } else if (parts.length === 2) {
-                  // Format: datasourcename.tablename (attached database, default to public schema)
-                  db = parts[0] ?? db;
-                  schemaName = 'public'; // Default schema for attached databases
-                  tableName = parts[1] ?? tableName;
-                } else if (parts.length === 1) {
-                  tableName = parts[0] ?? tableName;
+                let db = 'main';
+                let schemaName = 'main';
+                let tableName = viewId;
+                if (viewId.includes('.')) {
+                  const parts = viewId.split('.').filter(Boolean);
+                  if (parts.length === 3) {
+                    // Format: datasourcename.schema.tablename
+                    db = parts[0] ?? db;
+                    schemaName = parts[1] ?? schemaName;
+                    tableName = parts[2] ?? tableName;
+                  } else if (parts.length === 2) {
+                    // Format: datasourcename.tablename (attached database, default to public schema)
+                    db = parts[0] ?? db;
+                    schemaName = 'public'; // Default schema for attached databases
+                    tableName = parts[1] ?? tableName;
+                  } else if (parts.length === 1) {
+                    tableName = parts[0] ?? tableName;
+                  }
                 }
-              }
-              // Check if this is a system table before describing
-              // Only check the table name itself, not the full path, since datasource names can be anything
-              const { isSystemOrTempTable } = await import(
-                '../../tools/utils/business-context.utils'
-              );
-              
-              // For attached databases, only check the table name, not the full path
-              // The datasource name is user-defined and shouldn't be checked as a system schema
-              if (db !== 'main') {
-                // This is an attached database - only check table name
-                if (isSystemOrTempTable(tableName)) {
-                  throw new Error(
-                    `Cannot access system table: ${viewId}. Please query user tables only.`,
-                  );
+                // Check if this is a system table before describing
+                // Only check the table name itself, not the full path, since datasource names can be anything
+                const { isSystemOrTempTable } = await import(
+                  '../../tools/utils/business-context.utils'
+                );
+
+                // For attached databases, only check the table name, not the full path
+                // The datasource name is user-defined and shouldn't be checked as a system schema
+                if (db !== 'main') {
+                  // This is an attached database - only check table name
+                  if (isSystemOrTempTable(tableName)) {
+                    throw new Error(
+                      `Cannot access system table: ${viewId}. Please query user tables only.`,
+                    );
+                  }
+                } else {
+                  // Main database - check full name
+                  const fullName = `${db}.${schemaName}.${tableName}`;
+                  if (isSystemOrTempTable(fullName)) {
+                    throw new Error(
+                      `Cannot access system table: ${viewId}. Please query user tables only.`,
+                    );
+                  }
                 }
-              } else {
-                // Main database - check full name
-                const fullName = `${db}.${schemaName}.${tableName}`;
-                if (isSystemOrTempTable(fullName)) {
-                  throw new Error(
-                    `Cannot access system table: ${viewId}. Please query user tables only.`,
-                  );
-                }
-              }
 
                 const schema = await describeObject(db, schemaName, tableName);
                 if (!schema) {
@@ -493,19 +570,147 @@ export const readDataAgent = async (
                 collectedSchemas.set(viewId, schema);
               }
             } else {
-              // Describe everything discovered
+              // Describe everything discovered (OPTIMIZATION: Phase 4.1 - Batch queries)
+              const describeStartTime = performance.now();
+              let describedCount = 0;
+
+              // Group targets by database for batch processing
+              const targetsByDb = new Map<
+                string,
+                Array<{ db: string; schema: string; table: string }>
+              >();
               for (const target of targets) {
-                const fullName = `${target.db}.${target.schema}.${target.table}`;
-                const schema = await describeObject(
-                  target.db,
-                  target.schema,
-                  target.table,
-                );
-                if (schema) {
-                  collectedSchemas.set(fullName, schema);
+                if (!targetsByDb.has(target.db)) {
+                  targetsByDb.set(target.db, []);
+                }
+                targetsByDb.get(target.db)!.push(target);
+              }
+
+              // Process each database
+              for (const [db, dbTargets] of targetsByDb.entries()) {
+                if (db === 'main') {
+                  // For main database, describe individually (DuckDB views)
+                  for (const target of dbTargets) {
+                    const fullName = `${target.db}.${target.schema}.${target.table}`;
+                    const schema = await describeObject(
+                      target.db,
+                      target.schema,
+                      target.table,
+                    );
+                    if (schema) {
+                      collectedSchemas.set(fullName, schema);
+                      describedCount++;
+                    }
+                  }
+                } else {
+                  // For attached databases, batch query information_schema.columns
+                  const escapedDb = db.replace(/"/g, '""');
+                  try {
+                    // Build list of (schema, table) pairs for the query
+                    const tableFilters = dbTargets
+                      .map((t) => {
+                        const schema = t.schema.replace(/'/g, "''");
+                        const table = t.table.replace(/'/g, "''");
+                        return `('${schema}', '${table}')`;
+                      })
+                      .join(', ');
+
+                    if (tableFilters.length > 0) {
+                      const columnsQuery = `
+                        SELECT 
+                          table_schema,
+                          table_name,
+                          column_name,
+                          data_type
+                        FROM "${escapedDb}".information_schema.columns
+                        WHERE (table_schema, table_name) IN (${tableFilters})
+                        ORDER BY table_schema, table_name, ordinal_position
+                      `;
+
+                      const batchStartTime = performance.now();
+                      const columnsReader =
+                        await conn.runAndReadAll(columnsQuery);
+                      await columnsReader.readAll();
+                      const allColumns =
+                        columnsReader.getRowObjectsJS() as Array<{
+                          table_schema: string;
+                          table_name: string;
+                          column_name: string;
+                          data_type: string;
+                        }>;
+                      const batchTime = performance.now() - batchStartTime;
+                      console.log(
+                        `[ReadDataAgent] [PERF] Batch column query for ${db} took ${batchTime.toFixed(2)}ms (${allColumns.length} columns for ${dbTargets.length} tables)`,
+                      );
+
+                      // Group columns by table
+                      const columnsByTable = new Map<
+                        string,
+                        Array<{ columnName: string; columnType: string }>
+                      >();
+                      for (const col of allColumns) {
+                        const key = `${col.table_schema || 'main'}.${col.table_name}`;
+                        if (!columnsByTable.has(key)) {
+                          columnsByTable.set(key, []);
+                        }
+                        columnsByTable.get(key)!.push({
+                          columnName: col.column_name,
+                          columnType: col.data_type,
+                        });
+                      }
+
+                      // Create schemas for each target
+                      for (const target of dbTargets) {
+                        const tableKey = `${target.schema}.${target.table}`;
+                        const columns = columnsByTable.get(tableKey) || [];
+                        const fullName = `${target.db}.${target.schema}.${target.table}`;
+
+                        if (columns.length > 0) {
+                          collectedSchemas.set(fullName, {
+                            databaseName: target.db,
+                            schemaName: target.schema,
+                            tables: [
+                              {
+                                tableName: target.table,
+                                columns,
+                              },
+                            ],
+                          });
+                          describedCount++;
+                        }
+                      }
+                    }
+                  } catch (error) {
+                    // Fallback to individual describes if batch fails
+                    console.warn(
+                      `[ReadDataAgent] Batch describe failed for ${db}, falling back to individual:`,
+                      error,
+                    );
+                    for (const target of dbTargets) {
+                      const fullName = `${target.db}.${target.schema}.${target.table}`;
+                      const schema = await describeObject(
+                        target.db,
+                        target.schema,
+                        target.table,
+                      );
+                      if (schema) {
+                        collectedSchemas.set(fullName, schema);
+                        describedCount++;
+                      }
+                    }
+                  }
                 }
               }
+
+              const describeTime = performance.now() - describeStartTime;
+              console.log(
+                `[ReadDataAgent] [PERF] Describing ${describedCount} tables took ${describeTime.toFixed(2)}ms (avg ${(describeTime / Math.max(describedCount, 1)).toFixed(2)}ms per table)`,
+              );
             }
+            schemaDiscoveryTime = performance.now() - schemaDiscoveryStartTime;
+            console.log(
+              `[ReadDataAgent] [PERF] Total schema discovery took ${schemaDiscoveryTime.toFixed(2)}ms`,
+            );
           } finally {
             // Return connection to pool
             DuckDBInstanceManager.returnConnection(
@@ -516,7 +721,12 @@ export const readDataAgent = async (
           }
 
           // Get performance configuration
+          const perfConfigStartTime = performance.now();
           const perfConfig = await getConfig(fileDir);
+          const perfConfigTime = performance.now() - perfConfigStartTime;
+          console.log(
+            `[ReadDataAgent] [PERF] getConfig took ${perfConfigTime.toFixed(2)}ms`,
+          );
 
           // Build schemasMap with all collected schemas
           const schemasMap = collectedSchemas;
@@ -581,6 +791,7 @@ export const readDataAgent = async (
           }
 
           // Build fast context (synchronous, < 100ms)
+          const contextStartTime = performance.now();
           let fastContext: BusinessContext;
           if (
             requestedViews &&
@@ -590,11 +801,17 @@ export const readDataAgent = async (
             // Single view - build fast context
             const singleViewName = requestedViews[0];
             if (singleViewName) {
+              const buildContextStartTime = performance.now();
               fastContext = await buildBusinessContext({
                 conversationDir: fileDir,
                 viewName: singleViewName,
                 schema,
               });
+              const buildContextTime =
+                performance.now() - buildContextStartTime;
+              console.log(
+                `[ReadDataAgent] [PERF] buildBusinessContext (single) took ${buildContextTime.toFixed(2)}ms`,
+              );
 
               // Start enhancement in background (don't await)
               enhanceBusinessContextInBackground({
@@ -638,11 +855,17 @@ export const readDataAgent = async (
                 continue;
               }
 
+              const buildContextStartTime = performance.now();
               const ctx = await buildBusinessContext({
                 conversationDir: fileDir,
                 viewName: vName,
                 schema: vSchema,
               });
+              const buildContextTime =
+                performance.now() - buildContextStartTime;
+              console.log(
+                `[ReadDataAgent] [PERF] buildBusinessContext for ${vName} took ${buildContextTime.toFixed(2)}ms`,
+              );
               fastContexts.push(ctx);
 
               // Start enhancement in background for each view
@@ -654,8 +877,17 @@ export const readDataAgent = async (
               });
             }
             // Merge all fast contexts into one
+            const mergeStartTime = performance.now();
             fastContext = mergeBusinessContexts(fastContexts);
+            const mergeTime = performance.now() - mergeStartTime;
+            console.log(
+              `[ReadDataAgent] [PERF] mergeBusinessContexts (${fastContexts.length} contexts) took ${mergeTime.toFixed(2)}ms`,
+            );
           }
+          const contextTime = performance.now() - contextStartTime;
+          console.log(
+            `[ReadDataAgent] [PERF] Total business context building took ${contextTime.toFixed(2)}ms`,
+          );
 
           // Use fast context for immediate response
           const entities = Array.from(fastContext.entities.values()).slice(
@@ -689,6 +921,24 @@ export const readDataAgent = async (
           );
           const tableCount = allTableNames.length;
 
+          // Cache schema for single view requests (OPTIMIZATION: Phase 4.2)
+          if (requestedViews && requestedViews.length === 1) {
+            const singleView = requestedViews[0];
+            if (singleView) {
+              DuckDBInstanceManager.cacheSchema(
+                conversationId,
+                workspace,
+                singleView,
+                schema,
+              );
+            }
+          }
+
+          const totalTime = performance.now() - startTime;
+          console.log(
+            `[ReadDataAgent] [PERF] getSchema TOTAL took ${totalTime.toFixed(2)}ms (sync: ${syncTime.toFixed(2)}ms, discovery: ${schemaDiscoveryTime.toFixed(2)}ms, context: ${contextTime.toFixed(2)}ms)`,
+          );
+
           // Return schema and data insights (hide technical jargon)
           return {
             schema: schema,
@@ -717,12 +967,14 @@ export const readDataAgent = async (
           query: z.string(),
         }),
         execute: async ({ query }) => {
+          const startTime = performance.now();
           const workspace = getWorkspace();
           if (!workspace) {
             throw new Error('WORKSPACE environment variable is not set');
           }
 
           // Sync datasources before querying if repositories available
+          const syncStartTime = performance.now();
           if (repositories) {
             try {
               const getConversationService = new GetConversationBySlugService(
@@ -736,6 +988,7 @@ export const readDataAgent = async (
                   workspace,
                   conversation.datasources,
                   repositories.datasource,
+                  true, // OPTIMIZATION: Phase 5.2 - Detach unchecked in runQuery
                 );
               }
             } catch (error) {
@@ -745,12 +998,24 @@ export const readDataAgent = async (
               );
             }
           }
+          const syncTime = performance.now() - syncStartTime;
+          if (syncTime > 10) {
+            console.log(
+              `[ReadDataAgent] [PERF] runQuery syncDatasources took ${syncTime.toFixed(2)}ms`,
+            );
+          }
 
+          const queryStartTime = performance.now();
           const result = await runQuery({
             conversationId,
             workspace,
             query,
           });
+          const queryTime = performance.now() - queryStartTime;
+          const totalTime = performance.now() - startTime;
+          console.log(
+            `[ReadDataAgent] [PERF] runQuery TOTAL took ${totalTime.toFixed(2)}ms (sync: ${syncTime.toFixed(2)}ms, query: ${queryTime.toFixed(2)}ms, rows: ${result.rows.length})`,
+          );
 
           return {
             result: result,
@@ -872,6 +1137,7 @@ export const readDataAgent = async (
           sqlQuery = '',
           userInput = '',
         }) => {
+          const startTime = performance.now();
           const workspace = getWorkspace();
           if (!workspace) {
             throw new Error('WORKSPACE environment variable is not set');
@@ -880,13 +1146,21 @@ export const readDataAgent = async (
           const fileDir = join(workspace, conversationId);
 
           // Load business context if available
+          const contextStartTime = performance.now();
           let businessContext: BusinessContext | null = null;
           try {
             businessContext = await loadBusinessContext(fileDir);
           } catch {
             // Business context not available, continue without it
           }
+          const contextTime = performance.now() - contextStartTime;
+          if (contextTime > 10) {
+            console.log(
+              `[ReadDataAgent] [PERF] generateChart loadBusinessContext took ${contextTime.toFixed(2)}ms`,
+            );
+          }
 
+          const generateStartTime = performance.now();
           const result = await generateChart({
             chartType,
             queryResults,
@@ -894,6 +1168,11 @@ export const readDataAgent = async (
             userInput,
             businessContext,
           });
+          const generateTime = performance.now() - generateStartTime;
+          const totalTime = performance.now() - startTime;
+          console.log(
+            `[ReadDataAgent] [PERF] generateChart TOTAL took ${totalTime.toFixed(2)}ms (context: ${contextTime.toFixed(2)}ms, generate: ${generateTime.toFixed(2)}ms)`,
+          );
           return result;
         },
       }),

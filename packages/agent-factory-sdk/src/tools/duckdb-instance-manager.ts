@@ -5,6 +5,7 @@ import { attachForeignDatasource } from './foreign-datasource-attach';
 import { datasourceToDuckdb } from './datasource-to-duckdb';
 import { getDatasourceDatabaseName } from './datasource-name-utils';
 import type { Datasource } from '@qwery/domain/entities';
+import type { SimpleSchema } from '@qwery/domain/entities';
 
 // Connection type from DuckDB instance
 type Connection = Awaited<ReturnType<DuckDBInstance['connect']>>;
@@ -17,6 +18,11 @@ export interface DuckDBInstanceWrapper {
   dbPath: string;
   maxConnections: number;
   activeConnections: number;
+  // Schema caching (OPTIMIZATION: Phase 4.2)
+  schemaCache: Map<string, SimpleSchema>; // viewName -> schema
+  schemaCacheTimestamp: Map<string, number>; // viewName -> timestamp
+  lastSyncTimestamp: number;
+  lastSyncedDatasourceIds: string[];
 }
 
 export interface GetInstanceOptions {
@@ -72,6 +78,10 @@ class DuckDBInstanceManager {
       dbPath,
       maxConnections: this.maxConnectionsPerInstance,
       activeConnections: 0,
+      schemaCache: new Map(),
+      schemaCacheTimestamp: new Map(),
+      lastSyncTimestamp: 0,
+      lastSyncedDatasourceIds: [],
     };
 
     this.instances.set(key, wrapper);
@@ -154,15 +164,61 @@ class DuckDBInstanceManager {
   }
 
   /**
+   * Get cached schema for a view (OPTIMIZATION: Phase 4.2)
+   */
+  getCachedSchema(
+    conversationId: string,
+    workspace: string,
+    viewName: string,
+    maxAge: number = 60000, // 60 seconds default
+  ): SimpleSchema | null {
+    const key = `${workspace}:${conversationId}`;
+    const wrapper = this.instances.get(key);
+    if (!wrapper) return null;
+
+    const timestamp = wrapper.schemaCacheTimestamp.get(viewName);
+    if (!timestamp) return null;
+
+    if (Date.now() - timestamp > maxAge) {
+      // Cache expired
+      wrapper.schemaCache.delete(viewName);
+      wrapper.schemaCacheTimestamp.delete(viewName);
+      return null;
+    }
+
+    return wrapper.schemaCache.get(viewName) || null;
+  }
+
+  /**
+   * Cache schema for a view (OPTIMIZATION: Phase 4.2)
+   */
+  cacheSchema(
+    conversationId: string,
+    workspace: string,
+    viewName: string,
+    schema: SimpleSchema,
+  ): void {
+    const key = `${workspace}:${conversationId}`;
+    const wrapper = this.instances.get(key);
+    if (!wrapper) return;
+
+    wrapper.schemaCache.set(viewName, schema);
+    wrapper.schemaCacheTimestamp.set(viewName, Date.now());
+  }
+
+  /**
    * Sync datasources based on checked state from UI
    * Attaches/detaches foreign DBs and creates/drops views
+   * (OPTIMIZATION: Phase 5.1 - Smart sync detection)
    */
   async syncDatasources(
     conversationId: string,
     workspace: string,
     checkedDatasourceIds: string[],
     datasourceRepository: IDatasourceRepository,
+    detachUnchecked: boolean = true, // OPTIMIZATION: Phase 5.2
   ): Promise<void> {
+    const startTime = performance.now();
     console.log(
       `[DuckDBInstanceManager] Syncing ${checkedDatasourceIds.length} datasource(s) for conversation ${conversationId}`,
     );
@@ -173,7 +229,32 @@ class DuckDBInstanceManager {
       createIfNotExists: true,
     });
 
+    // Smart sync detection (OPTIMIZATION: Phase 5.1)
+    const datasourceIdsMatch =
+      wrapper.lastSyncedDatasourceIds.length === checkedDatasourceIds.length &&
+      wrapper.lastSyncedDatasourceIds.every((id) =>
+        checkedDatasourceIds.includes(id),
+      ) &&
+      checkedDatasourceIds.every((id) =>
+        wrapper.lastSyncedDatasourceIds.includes(id),
+      );
+
+    const recentlySynced = Date.now() - wrapper.lastSyncTimestamp < 5000; // 5 second cache
+
+    if (datasourceIdsMatch && recentlySynced) {
+      console.log(
+        `[DuckDBInstanceManager] [PERF] Skipping sync - no changes detected (last sync ${((Date.now() - wrapper.lastSyncTimestamp) / 1000).toFixed(2)}s ago)`,
+      );
+      return; // No sync needed
+    }
+
     const conn = await this.getConnection(conversationId, workspace);
+
+    // Declare timing variables outside try block for use in finally
+    let loadTime = 0;
+    let detachTime = 0;
+    let attachTime = 0;
+    let viewTime = 0;
 
     try {
       const checkedSet = new Set(checkedDatasourceIds);
@@ -190,21 +271,47 @@ class DuckDBInstanceManager {
           ...currentViews.keys(),
         ]),
       );
+      const loadStartTime = performance.now();
       const loaded = await loadDatasources(
         allDatasourceIds,
         datasourceRepository,
       );
+      loadTime = performance.now() - loadStartTime;
+      console.log(
+        `[DuckDBInstanceManager] [PERF] loadDatasources took ${loadTime.toFixed(2)}ms (${allDatasourceIds.length} datasources)`,
+      );
       const { duckdbNative, foreignDatabases } = groupDatasourcesByType(loaded);
 
-      // Detach unchecked foreign databases
-      for (const { datasource } of foreignDatabases) {
-        const dsId = datasource.id;
-        if (currentAttached.has(dsId) && !checkedSet.has(dsId)) {
-          console.log(`[DuckDBInstanceManager] Detaching datasource: ${dsId}`);
-          await this.detachForeignDB(conn, datasource);
-          currentAttached.delete(dsId);
-          console.log(`[DuckDBInstanceManager] Detached: ${dsId}`);
+      // Detach unchecked foreign databases (OPTIMIZATION: Phase 5.2 - only if detachUnchecked is true)
+      const detachStartTime = performance.now();
+      let detachCount = 0;
+      if (detachUnchecked) {
+        for (const { datasource } of foreignDatabases) {
+          const dsId = datasource.id;
+          if (currentAttached.has(dsId) && !checkedSet.has(dsId)) {
+            const detachItemStartTime = performance.now();
+            console.log(
+              `[DuckDBInstanceManager] Detaching datasource: ${dsId}`,
+            );
+            await this.detachForeignDB(conn, datasource);
+            currentAttached.delete(dsId);
+            const detachItemTime = performance.now() - detachItemStartTime;
+            console.log(
+              `[DuckDBInstanceManager] [PERF] Detached ${dsId} in ${detachItemTime.toFixed(2)}ms`,
+            );
+            detachCount++;
+          }
         }
+      }
+      detachTime = performance.now() - detachStartTime;
+      if (detachCount > 0) {
+        console.log(
+          `[DuckDBInstanceManager] [PERF] Detached ${detachCount} datasource(s) in ${detachTime.toFixed(2)}ms`,
+        );
+      } else if (detachUnchecked) {
+        console.log(
+          `[DuckDBInstanceManager] [PERF] No datasources to detach (took ${detachTime.toFixed(2)}ms)`,
+        );
       }
 
       // Drop views for unchecked DuckDB-native datasources
@@ -228,10 +335,13 @@ class DuckDBInstanceManager {
       }
 
       // Attach newly checked foreign databases
+      const attachStartTime = performance.now();
+      let attachCount = 0;
       for (const { datasource } of foreignDatabases) {
         const dsId = datasource.id;
         if (!currentAttached.has(dsId) && checkedSet.has(dsId)) {
           try {
+            const attachItemStartTime = performance.now();
             console.log(
               `[DuckDBInstanceManager] Attaching datasource: ${dsId}`,
             );
@@ -240,7 +350,11 @@ class DuckDBInstanceManager {
               datasource,
             });
             currentAttached.add(dsId);
-            console.log(`[DuckDBInstanceManager] Attached: ${dsId}`);
+            const attachItemTime = performance.now() - attachItemStartTime;
+            console.log(
+              `[DuckDBInstanceManager] [PERF] Attached ${dsId} in ${attachItemTime.toFixed(2)}ms`,
+            );
+            attachCount++;
           } catch (error) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
@@ -250,20 +364,31 @@ class DuckDBInstanceManager {
           }
         }
       }
+      attachTime = performance.now() - attachStartTime;
+      if (attachCount > 0) {
+        console.log(
+          `[DuckDBInstanceManager] [PERF] Attached ${attachCount} datasource(s) in ${attachTime.toFixed(2)}ms`,
+        );
+      }
 
       // Create views for newly checked DuckDB-native datasources
+      const viewStartTime = performance.now();
+      let viewCount = 0;
       for (const { datasource } of duckdbNative) {
         const dsId = datasource.id;
         if (!currentViews.has(dsId) && checkedSet.has(dsId)) {
           try {
+            const viewItemStartTime = performance.now();
             const result = await datasourceToDuckdb({
               connection: conn,
               datasource,
             });
             currentViews.set(dsId, result.viewName);
+            const viewItemTime = performance.now() - viewItemStartTime;
             console.log(
-              `[DuckDBInstanceManager] Created view: ${result.viewName} (datasource: ${dsId})`,
+              `[DuckDBInstanceManager] [PERF] Created view ${result.viewName} (${dsId}) in ${viewItemTime.toFixed(2)}ms`,
             );
+            viewCount++;
           } catch (error) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);
@@ -273,9 +398,23 @@ class DuckDBInstanceManager {
           }
         }
       }
+      viewTime = performance.now() - viewStartTime;
+      if (viewCount > 0) {
+        console.log(
+          `[DuckDBInstanceManager] [PERF] Created ${viewCount} view(s) in ${viewTime.toFixed(2)}ms`,
+        );
+      }
+
+      // Update state after sync (OPTIMIZATION: Phase 5.1)
+      wrapper.lastSyncTimestamp = Date.now();
+      wrapper.lastSyncedDatasourceIds = [...checkedDatasourceIds];
     } finally {
       this.returnConnection(conversationId, workspace, conn);
     }
+    const totalTime = performance.now() - startTime;
+    console.log(
+      `[DuckDBInstanceManager] [PERF] syncDatasources TOTAL took ${totalTime.toFixed(2)}ms (load: ${loadTime.toFixed(2)}ms, detach: ${detachTime.toFixed(2)}ms, attach: ${attachTime.toFixed(2)}ms, views: ${viewTime.toFixed(2)}ms)`,
+    );
   }
 
   /**

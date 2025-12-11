@@ -210,6 +210,12 @@ Available tools:
      * Pass to generateChart: { chartType: string, queryResults: { columns: string[], rows: Array<Record<string, unknown>> }, sqlQuery: string, userInput: string }
    - This tool generates the chart configuration JSON that will be rendered as a visualization
    - MUST be called AFTER selectChartType
+   - **CRITICAL - Multiple Chart Generation (OPTIMIZATION)**: If the user requests multiple charts or a "full report with charts":
+     * Run ALL queries first (using runQuery for each)
+     * Then call selectChartType for each query result
+     * Then call generateChart MULTIPLE TIMES in parallel - the agent framework will handle parallelization automatically
+     * DO NOT wait for each chart to complete before starting the next - call all generateChart tools at once
+     * This dramatically improves performance when generating multiple charts
 
 5) renameSheet
    - Input: oldSheetName, newSheetName.
