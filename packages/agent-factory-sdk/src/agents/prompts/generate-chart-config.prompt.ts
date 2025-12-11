@@ -33,7 +33,8 @@ SQL Query: ${sqlQuery}
 Query Results:
 - Columns: ${JSON.stringify(queryResults.columns)}
 - Total rows: ${queryResults.rows.length}
-- Data (first 100 rows): ${JSON.stringify(queryResults.rows.slice(0, 100), null, 2)}
+- Sample data structure (first 3 rows for type inference only): ${JSON.stringify(queryResults.rows.slice(0, 3), null, 2)}
+- Note: Use this sample to understand data types and structure. The full data will be used at render time.
 
 Chart Configuration Guidelines:
 
@@ -54,7 +55,7 @@ ${getChartGenerationPrompt(chartType)}
 3. Ensure numeric values are properly typed
 4. Handle null/undefined values appropriately
 
-**Configuration:**
+**Configuration (Concise):**
 - colors: Use actual hex color values (e.g., ["#8884d8", "#82ca9d", "#ffc658", "#ff7c7c", "#8dd1e1"])
   - DO NOT use CSS variables like "hsl(var(--chart-1))" as Recharts SVG doesn't support them
   - Use hex colors like "#8884d8" or rgb colors like "rgb(136, 132, 216)"
@@ -112,9 +113,12 @@ Output Format (strict JSON):
   }
 }
 
-**IMPORTANT**: You MUST transform the actual query results data provided above into the chart data format. Do NOT return an empty data array. Use the actual rows from the query results to populate the data array. Each row in the data array should be an object with keys matching the xKey and yKey values you specify in the config.
+**IMPORTANT**: Transform ALL query results rows into chart data format. Use sample data for type inference.
 
-Transform the query results into this format now.
+**CRITICAL - Date Handling**: If date fields are empty objects ({}), DuckDB date serialization failed. You MUST:
+1. Use SQL query context to determine expected date (e.g., date_trunc('week', opened_at) → date)
+2. Transform empty objects to date strings/timestamps
+3. If date cannot be determined, use sequential index as temporary x-axis value
 
 Current date: ${new Date().toISOString()}
 Version: 1.0.0

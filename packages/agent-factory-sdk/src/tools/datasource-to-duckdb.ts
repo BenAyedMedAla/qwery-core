@@ -37,6 +37,7 @@ export async function datasourceToDuckdb(
 
   // For DuckDB-native providers (gsheet-csv, csv, json-online, parquet-online),
   // we use DuckDB functions directly and don't need driver loading
+  // Other DuckDB-native providers (like youtube-data-api-v3, clickhouse-node) will use driver loading
   const duckdbNativeProviders = [
     'gsheet-csv',
     'csv',

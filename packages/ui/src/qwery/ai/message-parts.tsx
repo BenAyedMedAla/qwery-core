@@ -29,8 +29,6 @@ import { SQLQueryVisualizer } from './sql-query-visualizer';
 
 import { SchemaVisualizer } from './schema-visualizer';
 
-import { AvailableSheetsVisualizer } from './sheets/available-sheets-visualizer';
-
 import { ViewSheetVisualizer } from './sheets/view-sheet-visualizer';
 
 import { ViewSheetError } from './sheets/view-sheet-error';
@@ -262,35 +260,13 @@ export function ToolPart({ part, messageId, index }: ToolPartProps) {
             columns: Array<{ columnName: string; columnType: string }>;
           }>;
         };
+        allTables?: string[];
+        tableCount?: number;
       } | null;
+
+      // Always show schema if available - this is the primary purpose of getSchema
       if (output?.schema) {
         return <SchemaVisualizer schema={output.schema} />;
-      }
-    }
-
-    // Handle listAvailableSheets tool with AvailableSheetsVisualizer
-    if (part.type === 'tool-listAvailableSheets' && part.output) {
-      const output = part.output as {
-        sheets?: Array<{
-          name: string;
-          type: 'view' | 'table' | 'attached_table';
-        }>;
-        count?: number;
-      } | null;
-      if (output?.sheets) {
-        // Map tool output to visualizer format
-        const mappedSheets = output.sheets.map((sheet) => ({
-          name: sheet.name,
-          type: sheet.type === 'attached_table' ? 'table' : sheet.type,
-        }));
-        return (
-          <AvailableSheetsVisualizer
-            data={{
-              sheets: mappedSheets,
-              message: `Found ${output.count ?? mappedSheets.length} sheet${(output.count ?? mappedSheets.length) !== 1 ? 's' : ''}`,
-            }}
-          />
-        );
       }
     }
 

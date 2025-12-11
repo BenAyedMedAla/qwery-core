@@ -17,6 +17,8 @@ const DUCKDB_NATIVE_PROVIDERS = [
   'gsheet-csv',
   'json-online',
   'parquet-online',
+  'youtube-data-api-v3',
+  'clickhouse-node', // Uses driver system, not foreign database attachment
 ] as const;
 
 /**

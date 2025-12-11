@@ -1,6 +1,8 @@
 import type { Datasource } from '@qwery/domain/entities';
 import type { SimpleSchema } from '@qwery/domain/entities';
 import type { DuckDBInstance } from '@duckdb/node-api';
+import { getProviderMapping, getSupportedProviders } from './provider-registry';
+import { getDatasourceDatabaseName } from './datasource-name-utils';
 
 // Connection type from DuckDB instance
 type Connection = Awaited<ReturnType<DuckDBInstance['connect']>>;
@@ -8,6 +10,7 @@ type Connection = Awaited<ReturnType<DuckDBInstance['connect']>>;
 export interface ForeignDatasourceAttachOptions {
   connection: Connection; // Changed from dbPath
   datasource: Datasource;
+  extractSchema?: boolean; // Default: true for backward compatibility, set to false to skip schema extraction
 }
 
 export interface AttachResult {
@@ -40,76 +43,72 @@ export async function attachForeignDatasourceToConnection(
   opts: AttachToConnectionOptions,
 ): Promise<void> {
   const { conn, datasource } = opts;
-  const provider = datasource.datasource_provider.toLowerCase();
+  const provider = datasource.datasource_provider;
   const config = datasource.config as Record<string, unknown>;
 
-  // Generate a unique database name for this datasource attachment
-  const attachedDatabaseName = `ds_${datasource.id.replace(/-/g, '_')}`;
+  // Get provider mapping using abstraction
+  const mapping = await getProviderMapping(provider);
+  if (!mapping) {
+    const supported = await getSupportedProviders();
+    throw new Error(
+      `Foreign database type not supported: ${provider}. Supported types: ${supported.join(', ')}`,
+    );
+  }
 
-  // Install and load the appropriate extension
-  let attachQuery: string;
-  let connectionUrlForLog: string | undefined;
+  // Use datasource name directly as database name (sanitized)
+  const attachedDatabaseName = getDatasourceDatabaseName(datasource);
 
-  switch (provider) {
-    case 'postgresql':
-    case 'neon':
-    case 'supabase': {
-      await conn.run('INSTALL postgres');
-      await conn.run('LOAD postgres');
-
-      const connectionUrl = config.connectionUrl as string;
-      if (!connectionUrl) {
-        return;
-      }
-
-      connectionUrlForLog = connectionUrl;
-      attachQuery = `ATTACH '${connectionUrl.replace(/'/g, "''")}' AS "${attachedDatabaseName}" (TYPE POSTGRES)`;
-      break;
-    }
-
-    case 'mysql': {
-      await conn.run('INSTALL mysql');
-      await conn.run('LOAD mysql');
-
-      const connectionUrl =
-        (config.connectionUrl as string) ||
-        `host=${(config.host as string) || 'localhost'} port=${
-          (config.port as number) || 3306
-        } user=${(config.user as string) || 'root'} password=${
-          (config.password as string) || ''
-        } database=${(config.database as string) || ''}`;
-
-      attachQuery = `ATTACH '${connectionUrl.replace(/'/g, "''")}' AS "${attachedDatabaseName}" (TYPE MYSQL)`;
-      break;
-    }
-
-    case 'sqlite': {
-      const sqlitePath =
-        (config.path as string) || (config.connectionUrl as string);
-      if (!sqlitePath) {
-        // Skip this datasource if path is missing (matches main branch behavior)
-        return;
-      }
-
-      attachQuery = `ATTACH '${sqlitePath.replace(/'/g, "''")}' AS "${attachedDatabaseName}"`;
-      break;
-    }
-
-    default: {
-      throw new Error(
-        `Foreign database type not supported: ${provider}. Supported types: postgresql, mysql, sqlite`,
+  // Install and load the appropriate extension if needed
+  if (mapping.requiresExtension && mapping.extensionName) {
+    // Check if extension is already installed (OPTIMIZATION)
+    try {
+      const checkReader = await conn.runAndReadAll(
+        `SELECT extension_name FROM duckdb_extensions() WHERE extension_name = '${mapping.extensionName}'`,
       );
+      await checkReader.readAll();
+      const extensions = checkReader.getRowObjectsJS() as Array<{
+        extension_name: string;
+      }>;
+
+      if (extensions.length === 0) {
+        await conn.run(`INSTALL ${mapping.extensionName}`);
+      }
+    } catch {
+      // If check fails, try installing anyway
+      await conn.run(`INSTALL ${mapping.extensionName}`);
     }
+
+    // Always load (required for each connection)
+    await conn.run(`LOAD ${mapping.extensionName}`);
+  }
+
+  // Get connection string using abstraction
+  let connectionString: string;
+  try {
+    connectionString = mapping.getConnectionString(config);
+  } catch (error) {
+    // Skip this datasource if connection string is missing (matches main branch behavior)
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    if (errorMsg.includes('requires')) {
+      return;
+    }
+    throw error;
+  }
+
+  // Build attach query based on DuckDB type
+  let attachQuery: string;
+  if (mapping.duckdbType === 'SQLITE') {
+    attachQuery = `ATTACH '${connectionString.replace(/'/g, "''")}' AS "${attachedDatabaseName}"`;
+  } else {
+    attachQuery = `ATTACH '${connectionString.replace(/'/g, "''")}' AS "${attachedDatabaseName}" (TYPE ${mapping.duckdbType})`;
   }
 
   // Attach the foreign database
   try {
     await conn.run(attachQuery);
-    if (connectionUrlForLog) {
-      console.log(
-        `[ReadDataAgent] Attached ${attachedDatabaseName} with query: ${connectionUrlForLog.replace(/'/g, "''")}`,
-      );
-    }
+    console.log(
+      `[ReadDataAgent] Attached ${attachedDatabaseName} (${mapping.duckdbType})`,
+    );
   } catch (error) {
     // If already attached, that's okay
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -184,75 +183,47 @@ export async function attachAllForeignDatasourcesToConnection(opts: {
 export async function attachForeignDatasource(
   opts: ForeignDatasourceAttachOptions,
 ): Promise<AttachResult> {
-  const { connection: conn, datasource } = opts;
+  const { connection: conn, datasource, extractSchema = true } = opts;
 
-  const provider = datasource.datasource_provider.toLowerCase();
+  const provider = datasource.datasource_provider;
   const config = datasource.config as Record<string, unknown>;
   const tablesInfo: AttachResult['tables'] = [];
 
-  // Generate a unique database name for this datasource attachment
-  const attachedDatabaseName = `ds_${datasource.id.replace(/-/g, '_')}`;
+  // Get provider mapping using abstraction
+  const mapping = await getProviderMapping(provider);
+  if (!mapping) {
+    const supported = await getSupportedProviders();
+    throw new Error(
+      `Foreign database type not supported: ${provider}. Supported types: ${supported.join(', ')}`,
+    );
+  }
 
-  // Install and load the appropriate extension
+  // Use datasource name directly as database name (sanitized)
+  const attachedDatabaseName = getDatasourceDatabaseName(datasource);
+
+  // Install and load the appropriate extension if needed
+  if (mapping.requiresExtension && mapping.extensionName) {
+    await conn.run(`INSTALL ${mapping.extensionName}`);
+    await conn.run(`LOAD ${mapping.extensionName}`);
+  }
+
+  // Get connection string using abstraction
+  const connectionString = mapping.getConnectionString(config);
+
+  // Build attach query based on DuckDB type
   let attachQuery: string;
-
-  switch (provider) {
-    case 'postgresql':
-    case 'neon':
-    case 'supabase': {
-      await conn.run('INSTALL postgres');
-      await conn.run('LOAD postgres');
-
-      const pgConnectionUrl = config.connectionUrl as string;
-      if (!pgConnectionUrl) {
-        throw new Error(
-          'PostgreSQL datasource requires connectionUrl in config',
-        );
-      }
-
-      attachQuery = `ATTACH '${pgConnectionUrl.replace(/'/g, "''")}' AS "${attachedDatabaseName}" (TYPE POSTGRES)`;
-      break;
-    }
-
-    case 'mysql': {
-      await conn.run('INSTALL mysql');
-      await conn.run('LOAD mysql');
-
-      const mysqlHost = (config.host as string) || 'localhost';
-      const mysqlPort = (config.port as number) || 3306;
-      const mysqlUser = (config.user as string) || 'root';
-      const mysqlPassword = (config.password as string) || '';
-      const mysqlDatabase = (config.database as string) || '';
-
-      const mysqlConnectionString = `host=${mysqlHost} port=${mysqlPort} user=${mysqlUser} password=${mysqlPassword} database=${mysqlDatabase}`;
-      attachQuery = `ATTACH '${mysqlConnectionString.replace(/'/g, "''")}' AS "${attachedDatabaseName}" (TYPE MYSQL)`;
-      break;
-    }
-
-    case 'sqlite': {
-      const sqlitePath =
-        (config.path as string) || (config.connectionUrl as string);
-      if (!sqlitePath) {
-        throw new Error(
-          'SQLite datasource requires path or connectionUrl in config',
-        );
-      }
-
-      attachQuery = `ATTACH '${sqlitePath.replace(/'/g, "''")}' AS "${attachedDatabaseName}"`;
-      break;
-    }
-
-    default: {
-      throw new Error(
-        `Foreign database type not supported: ${provider}. Supported types: postgresql, mysql, sqlite`,
-      );
-    }
+  if (mapping.duckdbType === 'SQLITE') {
+    attachQuery = `ATTACH '${connectionString.replace(/'/g, "''")}' AS "${attachedDatabaseName}"`;
+  } else {
+    attachQuery = `ATTACH '${connectionString.replace(/'/g, "''")}' AS "${attachedDatabaseName}" (TYPE ${mapping.duckdbType})`;
   }
 
   // Attach the foreign database
   try {
     await conn.run(attachQuery);
-    console.debug(`[ForeignDatasourceAttach] Attached ${attachedDatabaseName}`);
+    console.debug(
+      `[ForeignDatasourceAttach] Attached ${attachedDatabaseName} (${mapping.duckdbType})`,
+    );
   } catch (error) {
     // If already attached, that's okay
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -264,39 +235,8 @@ export async function attachForeignDatasource(
     }
   }
 
-  // Get list of tables from the attached database
-  // Query information_schema to get tables
-  let tablesQuery: string;
-  if (
-    provider === 'postgresql' ||
-    provider === 'neon' ||
-    provider === 'supabase'
-  ) {
-    tablesQuery = `
-        SELECT table_schema, table_name
-        FROM ${attachedDatabaseName}.information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
-        AND table_type = 'BASE TABLE'
-        ORDER BY table_schema, table_name
-      `;
-  } else if (provider === 'mysql') {
-    tablesQuery = `
-        SELECT table_schema, table_name
-        FROM ${attachedDatabaseName}.information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-        AND table_type = 'BASE TABLE'
-        ORDER BY table_schema, table_name
-      `;
-  } else {
-    // SQLite
-    tablesQuery = `
-        SELECT 'main' as table_schema, name as table_name
-        FROM ${attachedDatabaseName}.sqlite_master
-        WHERE type = 'table'
-        AND name NOT LIKE 'sqlite_%'
-        ORDER BY name
-      `;
-  }
+  // Get list of tables from the attached database using abstraction
+  const tablesQuery = mapping.getTablesQuery(attachedDatabaseName);
 
   const tablesReader = await conn.runAndReadAll(tablesQuery);
   await tablesReader.readAll();
@@ -311,85 +251,153 @@ export async function attachForeignDatasource(
   );
   const systemSchemas = await getSystemSchemas(datasource.datasource_provider);
 
-  // Create views for each table
-  for (const table of tables) {
+  // Filter out system tables first
+  const userTables = tables.filter((table) => {
     const schemaName = table.table_schema || 'main';
     const tableName = table.table_name;
+    return (
+      !systemSchemas.has(schemaName.toLowerCase()) &&
+      !isSystemTableName(tableName)
+    );
+  });
 
-    // Skip system/internal schemas and tables
-    if (systemSchemas.has(schemaName.toLowerCase())) {
-      continue;
+  // If schema extraction is disabled, just return table paths without schema
+  if (!extractSchema) {
+    for (const table of userTables) {
+      const schemaName = table.table_schema || 'main';
+      const tableName = table.table_name;
+      const tablePath = `${attachedDatabaseName}.${schemaName}.${tableName}`;
+      tablesInfo.push({
+        schema: schemaName,
+        table: tableName,
+        path: tablePath,
+        schemaDefinition: undefined,
+      });
     }
+    return {
+      attachedDatabaseName,
+      tables: tablesInfo,
+    };
+  }
 
-    // Skip system tables
-    if (isSystemTableName(tableName)) {
-      continue;
+  // Batch fetch all column information in a single query (OPTIMIZATION)
+  const escapedDbName = attachedDatabaseName.replace(/"/g, '""');
+  const columnsByTable = new Map<
+    string,
+    Array<{ columnName: string; columnType: string }>
+  >();
+
+  try {
+    // Build list of (schema, table) pairs for the query
+    const tableFilters = userTables
+      .map((t) => {
+        const schema = (t.table_schema || 'main').replace(/'/g, "''");
+        const table = t.table_name.replace(/'/g, "''");
+        return `('${schema}', '${table}')`;
+      })
+      .join(', ');
+
+    if (tableFilters.length > 0) {
+      const columnsQuery = `
+        SELECT 
+          table_schema,
+          table_name,
+          column_name,
+          data_type
+        FROM "${escapedDbName}".information_schema.columns
+        WHERE (table_schema, table_name) IN (${tableFilters})
+        ORDER BY table_schema, table_name, ordinal_position
+      `;
+
+      const columnsStartTime = performance.now();
+      const columnsReader = await conn.runAndReadAll(columnsQuery);
+      await columnsReader.readAll();
+      const allColumns = columnsReader.getRowObjectsJS() as Array<{
+        table_schema: string;
+        table_name: string;
+        column_name: string;
+        data_type: string;
+      }>;
+      const columnsTime = performance.now() - columnsStartTime;
+      console.log(
+        `[ForeignDatasourceAttach] [PERF] Batch column query took ${columnsTime.toFixed(2)}ms (${allColumns.length} columns for ${userTables.length} tables)`,
+      );
+
+      // Group columns by table
+      for (const col of allColumns) {
+        const key = `${col.table_schema || 'main'}.${col.table_name}`;
+        if (!columnsByTable.has(key)) {
+          columnsByTable.set(key, []);
+        }
+        columnsByTable.get(key)!.push({
+          columnName: col.column_name,
+          columnType: col.data_type,
+        });
+      }
     }
+  } catch (error) {
+    // If batch query fails, fall back to individual DESCRIBE queries
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[ForeignDatasourceAttach] Batch column query failed, falling back to individual DESCRIBE: ${errorMsg}`,
+    );
+    // Will fall through to individual describe logic below
+  }
+
+  // Process each table
+  for (const table of userTables) {
+    const schemaName = table.table_schema || 'main';
+    const tableName = table.table_name;
+    const tablePath = `${attachedDatabaseName}.${schemaName}.${tableName}`;
+    const tableKey = `${schemaName}.${tableName}`;
 
     try {
-      // Generate semantic view name
-      // Use attached database path directly (no view creation)
-      const escapedSchemaName = schemaName.replace(/"/g, '""');
-      const escapedTableName = tableName.replace(/"/g, '""');
-      const escapedDbName = attachedDatabaseName.replace(/"/g, '""');
-      const tablePath = `${attachedDatabaseName}.${schemaName}.${tableName}`;
-
-      // Test if we can access the table directly
-      try {
-        await conn.run(
-          `SELECT 1 FROM "${escapedDbName}"."${escapedSchemaName}"."${escapedTableName}" LIMIT 1`,
-        );
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        // Check if it's a permission or access error
-        const isPermissionError =
-          errorMsg.includes('permission') ||
-          errorMsg.includes('access') ||
-          errorMsg.includes('denied') ||
-          errorMsg.includes('does not exist') ||
-          errorMsg.includes('relation');
-
-        if (isPermissionError) {
-          // REMOVE: console.debug - just skip silently
-          // Permission errors are expected for system tables or restricted schemas
-        } else {
-          // Only log unexpected errors
-          console.warn(
-            `[ForeignDatasourceAttach] Cannot access table ${schemaName}.${tableName}: ${errorMsg}`,
-          );
-        }
-        // Skip this table and continue with others
-        continue;
-      }
-
-      // Extract schema directly from the attached table (for optional diagnostics)
       let schema: SimpleSchema | undefined;
-      try {
-        const describeQuery = `DESCRIBE "${escapedDbName}"."${escapedSchemaName}"."${escapedTableName}"`;
-        const describeReader = await conn.runAndReadAll(describeQuery);
-        await describeReader.readAll();
-        const describeRows = describeReader.getRowObjectsJS() as Array<{
-          column_name: string;
-          column_type: string;
-          null: string;
-        }>;
 
+      // Use batched column data if available
+      const columns = columnsByTable.get(tableKey);
+      if (columns && columns.length > 0) {
         schema = {
-          databaseName: schemaName,
+          databaseName: attachedDatabaseName,
           schemaName,
           tables: [
             {
               tableName,
-              columns: describeRows.map((col) => ({
-                columnName: col.column_name,
-                columnType: col.column_type,
-              })),
+              columns,
             },
           ],
         };
-      } catch {
-        // Non-blocking; we still expose the path
-        schema = undefined;
+      } else {
+        // Fallback to individual DESCRIBE if batch didn't work
+        try {
+          const escapedSchemaName = schemaName.replace(/"/g, '""');
+          const escapedTableName = tableName.replace(/"/g, '""');
+          const describeQuery = `DESCRIBE "${escapedDbName}"."${escapedSchemaName}"."${escapedTableName}"`;
+          const describeReader = await conn.runAndReadAll(describeQuery);
+          await describeReader.readAll();
+          const describeRows = describeReader.getRowObjectsJS() as Array<{
+            column_name: string;
+            column_type: string;
+            null: string;
+          }>;
+
+          schema = {
+            databaseName: attachedDatabaseName,
+            schemaName,
+            tables: [
+              {
+                tableName,
+                columns: describeRows.map((col) => ({
+                  columnName: col.column_name,
+                  columnType: col.column_type,
+                })),
+              },
+            ],
+          };
+        } catch {
+          // Non-blocking; we still expose the path
+          schema = undefined;
+        }
       }
 
       tablesInfo.push({

@@ -105,39 +105,43 @@ export async function initializeDatasources(
       }
     }
 
-    // Initialize foreign databases using same connection
-    for (const { datasource } of foreignDatabases) {
+    // Initialize foreign databases in parallel (OPTIMIZATION)
+    const foreignDbPromises = foreignDatabases.map(async ({ datasource }) => {
       try {
-        // Attach foreign database
+        // Attach foreign database (skip schema extraction during init for speed)
         const attachResult = await attachForeignDatasource({
           connection: conn,
           datasource,
+          extractSchema: false, // Don't need schema during init - saves time
         });
 
         // Register attachment in instance wrapper
         instanceWrapper.attachedDatasources.add(datasource.id);
 
-        results.push({
+        return {
           success: true,
           datasourceId: datasource.id,
           datasourceName: datasource.name,
           viewsCreated: attachResult.tables.length,
-        });
+        };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         console.error(
           `[DatasourceInitializer] Failed to initialize foreign datasource ${datasource.id}:`,
           errorMsg,
         );
-        results.push({
+        return {
           success: false,
           datasourceId: datasource.id,
           datasourceName: datasource.name,
           viewsCreated: 0,
           error: errorMsg,
-        });
+        };
       }
-    }
+    });
+
+    const foreignDbResults = await Promise.all(foreignDbPromises);
+    results.push(...foreignDbResults);
 
     // REMOVE: The syncDatasources call - we already initialized only checked ones
     // If checkedDatasourceIds was provided, we only initialized those
