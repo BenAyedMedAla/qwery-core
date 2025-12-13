@@ -319,12 +319,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // Get or create agent
     const agent = await getOrCreateAgent(conversationSlug, model);
 
-    // Create user message
+    // Create user message with datasource metadata from notebook cell
     const messages: UIMessage[] = [
       {
         id: uuidv4(),
         role: 'user',
         parts: [{ type: 'text', text: query }],
+        metadata: {
+          datasources: [datasourceId],
+          source: 'notebook-cell',
+        },
       },
     ];
 

@@ -67,6 +67,8 @@ export interface QweryAgentUIProps {
   datasourcesLoading?: boolean;
   // Message persistence
   onMessageUpdate?: (messageId: string, content: string) => Promise<void>;
+  // Expose sendMessage function and current model for external use (e.g., notebook sidebar)
+  onSendMessageReady?: (sendMessage: ReturnType<typeof useChat>['sendMessage'], model: string) => void;
 }
 
 export default function QweryAgentUI(props: QweryAgentUIProps) {
@@ -83,6 +85,7 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
     pluginLogoMap,
     datasourcesLoading,
     onMessageUpdate,
+    onSendMessageReady,
   } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const hasFocusedRef = useRef(false);
@@ -134,6 +137,18 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
       transport: transportInstance,
     });
 
+  // Expose sendMessage, setMessages, and current model to parent component (for notebook sidebar integration)
+  useEffect(() => {
+    if (onSendMessageReady) {
+      // Create a wrapper that also exposes setMessages for metadata updates
+      const wrappedSendMessage = (message: Parameters<typeof sendMessage>[0], options?: Parameters<typeof sendMessage>[1]) => {
+        return sendMessage(message, options);
+      };
+      (wrappedSendMessage as any).setMessages = setMessages;
+      onSendMessageReady(wrappedSendMessage as any, state.model);
+    }
+  }, [sendMessage, setMessages, state.model, onSendMessageReady]);
+
   const { setIsProcessing } = useAgentStatus();
 
   useEffect(() => {
@@ -142,13 +157,28 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
 
   // Update messages when initialMessages changes (e.g., when conversation loads)
   // This is important for notebook chat integration where messages load asynchronously
+  // IMPORTANT: Don't update during streaming to avoid flickering
   const previousInitialMessagesRef = useRef<UIMessage[] | undefined>(undefined);
+  const isInitialMountRef = useRef(true);
+  
   useEffect(() => {
+    // Skip updates during streaming to prevent flickering
+    if (status === 'streaming' || status === 'submitted') {
+      return;
+    }
+    
     // Only update if initialMessages actually changed
     if (initialMessages !== previousInitialMessagesRef.current) {
       previousInitialMessagesRef.current = initialMessages;
       
       if (initialMessages && initialMessages.length > 0) {
+        // On initial mount, always set messages
+        if (isInitialMountRef.current && messages.length === 0) {
+          isInitialMountRef.current = false;
+          setMessages(initialMessages);
+          return;
+        }
+        
         // Check if messages are actually different
         const currentMessageIds = new Set(messages.map((m) => m.id));
         const initialMessageIds = new Set(initialMessages.map((m) => m.id));
@@ -156,18 +186,22 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
           currentMessageIds.size === initialMessageIds.size &&
           Array.from(currentMessageIds).every((id) => initialMessageIds.has(id));
 
+        // Only update if IDs don't match AND we're not streaming
         if (!idsMatch) {
           setMessages(initialMessages);
         }
       } else if (initialMessages && initialMessages.length === 0 && messages.length > 0) {
         // If initialMessages is empty array, clear messages (conversation was cleared)
+        // But only if not streaming
         setMessages([]);
       } else if (!initialMessages && messages.length === 0) {
         // If initialMessages is undefined and we have no messages, that's fine
         // Don't update
       }
+      
+      isInitialMountRef.current = false;
     }
-  }, [initialMessages, setMessages, messages]);
+  }, [initialMessages, setMessages, messages, status]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollToBottomRef = useRef<(() => void) | null>(null);
@@ -316,11 +350,11 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
     <PromptInputProvider initialInput={state.input}>
       <div
         ref={containerRef}
-        className="relative mx-auto flex h-full w-full max-w-4xl min-w-0 flex-col p-6"
+        className="relative mx-auto flex h-full w-full max-w-4xl min-w-0 flex-col p-6 overflow-x-hidden"
       >
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <Conversation className="min-h-0 min-w-0 flex-1">
-            <ConversationContent className="min-w-0">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
+          <Conversation className="min-h-0 min-w-0 flex-1 overflow-x-hidden">
+            <ConversationContent className="min-w-0 max-w-full overflow-x-hidden">
               {messages.length === 0 ? (
                 <ConversationEmptyState
                   title="Start a conversation"
@@ -345,7 +379,7 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                       : -1;
 
                   return (
-                    <div key={message.id}>
+                    <div key={message.id} className="min-w-0 max-w-full overflow-x-hidden">
                       {message.role === 'assistant' &&
                         sourceParts.length > 0 && (
                           <Sources>
@@ -385,7 +419,7 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                               <div
                                 key={`${message.id}-${i}`}
                                 className={cn(
-                                  'flex items-start gap-3',
+                                  'flex items-start gap-3 min-w-0 max-w-full overflow-x-hidden',
                                   message.role === 'user' && 'justify-end',
                                   message.role === 'assistant' &&
                                     'animate-in fade-in slide-in-from-bottom-4 duration-300',
@@ -401,7 +435,7 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                                     />
                                   </div>
                                 )}
-                                <div className="flex-end flex w-full max-w-[80%] min-w-0 flex-col justify-start gap-2">
+                                <div className="flex-end flex w-full max-w-[80%] min-w-0 flex-col justify-start gap-2 overflow-x-hidden">
                                   {isEditing && message.role === 'user' ? (
                                     <>
                                       <Textarea
@@ -456,32 +490,39 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                                           
                                           // Extract datasources from message metadata or use selectedDatasources for the last user message
                                           const messageDatasources = (() => {
-                                            // Find the last user message in the messages array
+                                            // Priority 1: Check message metadata first (for notebook cell messages and persisted messages)
+                                            // This ensures notebook cell datasource is always used
+                                            if (message.metadata && typeof message.metadata === 'object') {
+                                              const metadata = message.metadata as Record<string, unknown>;
+                                              if ('datasources' in metadata && Array.isArray(metadata.datasources)) {
+                                                const metadataDatasources = (metadata.datasources as string[])
+                                                  .map((dsId) => datasources?.find((ds) => ds.id === dsId))
+                                                  .filter((ds): ds is DatasourceItem => ds !== undefined);
+                                                // Only use metadata datasources if they exist and are valid
+                                                if (metadataDatasources.length > 0) {
+                                                  return metadataDatasources;
+                                                }
+                                              }
+                                            }
+                                            
+                                            // Priority 2: For the last user message (especially during streaming), use selectedDatasources
+                                            // This ensures correct datasource is shown immediately, even before metadata is set
                                             const lastUserMessage = [...messages]
                                               .reverse()
                                               .find((msg) => msg.role === 'user');
                                             
-                                            // Check if this is the last user message and we have selectedDatasources
-                                            // This allows badges to appear immediately when message is sent
                                             const isLastUserMessage = lastUserMessage?.id === message.id;
                                             
+                                            // Use selectedDatasources for the last user message if:
+                                            // 1. It's the last user message (most recent)
+                                            // 2. We're streaming or the message was just sent (metadata might not be set yet)
+                                            // 3. selectedDatasources is available
                                             if (isLastUserMessage && selectedDatasources && selectedDatasources.length > 0) {
-                                              // Use selectedDatasources for immediate display
                                               return selectedDatasources
                                                 .map((dsId) => datasources?.find((ds) => ds.id === dsId))
                                                 .filter((ds): ds is DatasourceItem => ds !== undefined);
                                             }
                                             
-                                            // Otherwise, try to get from metadata (for persisted messages)
-                                            if (!message.metadata || typeof message.metadata !== 'object') {
-                                              return undefined;
-                                            }
-                                            const metadata = message.metadata as Record<string, unknown>;
-                                            if ('datasources' in metadata && Array.isArray(metadata.datasources)) {
-                                              return (metadata.datasources as string[])
-                                                .map((dsId) => datasources?.find((ds) => ds.id === dsId))
-                                                .filter((ds): ds is DatasourceItem => ds !== undefined);
-                                            }
                                             return undefined;
                                           })();
                                           
@@ -503,7 +544,7 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                                           return (
                                             <div className="flex flex-col items-end gap-1.5">
                                               {messageDatasources && messageDatasources.length > 0 && (
-                                                <div className="flex w-full max-w-[80%] justify-end">
+                                                <div className="flex w-full max-w-[80%] min-w-0 justify-end overflow-x-hidden">
                                                   <DatasourceBadges
                                                     datasources={messageDatasources}
                                                     pluginLogoMap={pluginLogoMap}
@@ -513,10 +554,10 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                                               <Message
                                                 key={`${message.id}-${i}`}
                                                 from={message.role}
-                                                className="w-full"
+                                                className="w-full min-w-0 max-w-full"
                                               >
-                                                <MessageContent>
-                                                  <div className="inline-flex items-baseline gap-0.5">
+                                                <MessageContent className="min-w-0 max-w-full overflow-x-hidden">
+                                                  <div className="inline-flex items-baseline gap-0.5 min-w-0 break-words overflow-wrap-anywhere">
                                                     {part.text}
                                                   </div>
                                                 </MessageContent>
@@ -530,10 +571,10 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                                           {!isStreaming && (
                                             <Message
                                               from={message.role}
-                                              className="w-full"
+                                              className="w-full min-w-0 max-w-full"
                                             >
-                                              <MessageContent>
-                                                <div className="inline-flex items-baseline gap-0.5">
+                                              <MessageContent className="min-w-0 max-w-full overflow-x-hidden">
+                                                <div className="inline-flex items-baseline gap-0.5 min-w-0 break-words overflow-wrap-anywhere">
                                                   <StreamdownWithSuggestions
                                                     sendMessage={sendMessage}
                                                     messages={messages}
@@ -548,10 +589,10 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                                           {isStreaming && (
                                             <Message
                                               from={message.role}
-                                              className="w-full"
+                                              className="w-full min-w-0 max-w-full"
                                             >
-                                              <MessageContent>
-                                                <div className="inline-flex items-baseline gap-0.5">
+                                              <MessageContent className="min-w-0 max-w-full overflow-x-hidden">
+                                                <div className="inline-flex items-baseline gap-0.5 min-w-0 break-words overflow-wrap-anywhere">
                                                   <StreamdownWithSuggestions
                                                     sendMessage={sendMessage}
                                                     messages={messages}
@@ -708,16 +749,16 @@ export default function QweryAgentUI(props: QweryAgentUIProps) {
                 })
               )}
               {((status === 'submitted') || (status === 'streaming' && (!lastAssistantHasText || !lastMessageIsAssistant))) && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 flex items-start gap-3 duration-300">
+                <div className="animate-in fade-in slide-in-from-bottom-4 flex items-start gap-3 duration-300 min-w-0 max-w-full overflow-x-hidden">
                   <BotAvatar
                     size={6}
                     isLoading={true}
                     className="mt-1 shrink-0"
                   />
-                  <div className="flex-end flex w-full max-w-[80%] min-w-0 flex-col justify-start gap-2">
-                    <Message from="assistant" className="w-full">
-                      <MessageContent>
-                        <div className="inline-flex items-baseline gap-0.5">
+                                <div className="flex-end flex w-full max-w-[80%] min-w-0 flex-col justify-start gap-2 overflow-x-hidden">
+                    <Message from="assistant" className="w-full min-w-0 max-w-full">
+                      <MessageContent className="min-w-0 max-w-full overflow-x-hidden">
+                        <div className="inline-flex items-baseline gap-0.5 min-w-0 break-words overflow-wrap-anywhere">
                           <MessageResponse></MessageResponse>
                         </div>
                       </MessageContent>

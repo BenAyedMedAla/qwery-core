@@ -207,16 +207,16 @@ export function UserMessageBubble({
     <div className="flex flex-col items-end gap-1.5">
       {/* Datasources displayed above the message bubble */}
       {datasources && datasources.length > 0 && (
-        <div className="flex w-full max-w-[80%] justify-end">
+        <div className="flex w-full max-w-[80%] min-w-0 justify-end overflow-x-hidden">
           <DatasourceBadges
             datasources={datasources}
             pluginLogoMap={pluginLogoMap}
           />
         </div>
       )}
-      <div className="flex items-start gap-0.5">
+      <div className="flex items-start gap-0.5 min-w-0 max-w-full overflow-x-hidden">
         {/* Scroll back button - outside the message bubble, on the left */}
-        <Message from="user" className={cn('!w-auto !max-w-[80%] flex flex-row items-center gap-2', className)}>
+        <Message from="user" className={cn('!w-auto !max-w-[80%] min-w-0 flex flex-row items-center gap-2', className)}>
         {hasSourceSuggestion && (
           <Button
             variant="ghost"
@@ -228,7 +228,7 @@ export function UserMessageBubble({
             <ArrowUpLeft className="size-3" />
           </Button>
         )}
-        <MessageContent className="relative overflow-hidden min-w-0 max-w-full">
+        <MessageContent className="relative overflow-hidden min-w-0 max-w-full break-words overflow-wrap-anywhere" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
           {!isExpanded ? (
             // Compact mode - just show the suggestion text
             <div className="flex items-center justify-between gap-2 min-w-0">
@@ -289,8 +289,8 @@ export function UserMessageBubble({
                           Previous Question
                         </button>
                         {showContext.previousQuestion && (
-                          <div className="w-full min-w-0 overflow-hidden">
-                            <div className="prose prose-sm dark:prose-invert max-w-none break-words overflow-wrap-anywhere">
+                          <div className="w-full min-w-0 overflow-hidden overflow-x-hidden">
+                            <div className="prose prose-sm dark:prose-invert max-w-none min-w-0 break-words overflow-wrap-anywhere overflow-x-hidden [&>*]:max-w-full [&>*]:min-w-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words">
                               <ReactMarkdown
                                 remarkPlugins={[remarkGfm]}
                                 components={agentMarkdownComponents}

@@ -106,6 +106,19 @@ class DuckDBInstanceManager {
   }
 
   /**
+   * Reset sync cache for a conversation to force re-sync on next syncDatasources call
+   * This is useful when datasources change and we need to ensure a fresh sync
+   */
+  resetSyncCache(conversationId: string, workspace: string): void {
+    const wrapper = this.getWrapper(conversationId, workspace);
+    if (wrapper) {
+      wrapper.lastSyncTimestamp = 0;
+      wrapper.lastSyncedDatasourceIds = [];
+      console.log(`[DuckDBInstanceManager] Reset sync cache for conversation ${conversationId}`);
+    }
+  }
+
+  /**
    * Get a connection from the pool (or create one if pool is empty)
    */
   async getConnection(

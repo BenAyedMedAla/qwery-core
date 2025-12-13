@@ -109,6 +109,62 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const conversation =
       await repositories.conversation.findBySlug(conversationSlug);
 
+    // CRITICAL: Update conversation datasources if provided in request body
+    // The agent uses conversation datasources, so we must update them before creating the agent
+    if (datasources && datasources.length > 0 && conversation) {
+      const currentDatasources = conversation.datasources || [];
+      // Check if datasources are different by comparing IDs (not just count)
+      // Sort both arrays to ensure consistent comparison regardless of order
+      const currentSorted = [...currentDatasources].sort();
+      const newSorted = [...datasources].sort();
+      const datasourcesChanged = 
+        currentSorted.length !== newSorted.length ||
+        !currentSorted.every((dsId, index) => dsId === newSorted[index]);
+      
+      if (datasourcesChanged) {
+        console.log(`[Chat API] Updating conversation datasources from [${currentDatasources.join(', ')}] to [${datasources.join(', ')}]`);
+        
+        // CRITICAL: Invalidate cached agent BEFORE updating conversation
+        // This ensures the agent cache is cleared before we update the conversation
+        // so the new agent will read the updated datasources
+        const cachedAgent = agents.get(conversationSlug);
+        if (cachedAgent) {
+          try {
+            // Stop the old agent
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (cachedAgent as any).factoryActor?.stop();
+          } catch (error) {
+            console.warn(`Error stopping agent ${conversationSlug}:`, error);
+          }
+          // Remove from cache to force recreation with new datasources
+          agents.delete(conversationSlug);
+          agentLastAccess.delete(conversationSlug);
+          agentCreationLocks.delete(conversationSlug);
+          console.log(`[Chat API] Invalidated cached agent for conversation ${conversationSlug} due to datasource change`);
+        }
+        
+        // CRITICAL: Update conversation AFTER invalidating agent cache
+        // This ensures the new agent will read the updated datasources
+        await repositories.conversation.update({
+          ...conversation,
+          datasources: datasources, // REPLACE with the provided datasources
+          updatedBy: conversation.createdBy || 'system',
+          updatedAt: new Date(),
+        });
+        
+        // Refetch conversation to get updated datasources
+        // This ensures the conversation object has the latest datasources before agent creation
+        const updatedConversation = await repositories.conversation.findBySlug(conversationSlug);
+        if (updatedConversation) {
+          // Update the conversation reference for the rest of the function
+          Object.assign(conversation, updatedConversation);
+          console.log(`[Chat API] Conversation datasources updated to: [${updatedConversation.datasources?.join(', ') || 'none'}]`);
+        } else {
+          console.warn(`[Chat API] Failed to refetch conversation after datasource update`);
+        }
+      }
+    }
+
     const shouldGenerateTitle =
       conversation &&
       conversation.title === 'New Conversation' &&

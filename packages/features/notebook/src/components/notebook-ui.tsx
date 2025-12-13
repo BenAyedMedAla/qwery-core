@@ -942,7 +942,7 @@ export function NotebookUI({
                       onRunQueryWithAgent={handleRunQueryWithAgent}
                       datasources={allDatasources}
                       result={cellResults.get(cell.cellId)}
-                      error={cellError}
+                      error={undefined}
                       isLoading={isLoading}
                       onMoveUp={handleMoveCellUp}
                       onMoveDown={handleMoveCellDown}
@@ -955,6 +955,19 @@ export function NotebookUI({
                       onOpenAiPopup={handleOpenAiPopup}
                       onCloseAiPopup={handleCloseAiPopup}
                     />
+                    {/* Error Display - Between cells */}
+                    {cell.cellType === 'query' &&
+                      cellError &&
+                      !collapsedCells.has(cell.cellId) && (
+                        <div className="border-border border-b">
+                          <Alert variant="destructive" className="m-4">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertDescription className="font-mono text-sm">
+                              {cellError}
+                            </AlertDescription>
+                          </Alert>
+                        </div>
+                      )}
                     {index < cells.length - 1 && (
                       <CellDivider
                         onAddCell={(type) => handleAddCell(cell.cellId, type)}

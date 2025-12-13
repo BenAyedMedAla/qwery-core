@@ -7,6 +7,7 @@ import type { UIMessage, ToolUIPart } from 'ai';
 import type { useChat } from '@ai-sdk/react';
 import { createPortal } from 'react-dom';
 import { parseMessageWithContext } from './user-message-bubble';
+import { cn } from '../../lib/utils';
 
 export interface StreamdownWithSuggestionsProps {
   children: string;
@@ -446,7 +447,7 @@ export const StreamdownWithSuggestions = memo(
     }, [children, sendMessage, messages, currentMessageId]);
 
     return (
-      <div ref={containerRef} className={className}>
+      <div ref={containerRef} className={cn('min-w-0 max-w-full overflow-hidden', className)} style={{ maxWidth: '100%', overflowX: 'hidden' }}>
         <MessageResponse>{children}</MessageResponse>
       </div>
     );

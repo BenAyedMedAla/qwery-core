@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 
 import { Navigate, useNavigate, useParams } from 'react-router';
 
@@ -22,9 +22,8 @@ import { useGetNotebook } from '~/lib/queries/use-get-notebook';
 import { NOTEBOOK_EVENTS, telemetry } from '@qwery/telemetry';
 import { Skeleton } from '@qwery/ui/skeleton';
 import { getAllExtensionMetadata } from '@qwery/extensions-loader';
-import { useAgentSidebar } from '~/lib/context/agent-sidebar-context';
+import { useNotebookSidebar } from '~/lib/context/notebook-sidebar-context';
 import { useGetNotebookConversation } from '~/lib/queries/use-get-notebook-conversation';
-import { getMessagesByConversationSlugKey } from '~/lib/queries/use-get-messages';
 
 export default function NotebookPage() {
   const params = useParams();
@@ -62,6 +61,9 @@ export default function NotebookPage() {
   );
 
   // Switch conversation when notebook changes
+  // Only update URL if conversation exists and is different from current
+  // Don't remove conversation param if it doesn't exist yet - let it be created on first prompt
+  // This prevents race conditions and preserves sidebar state on refresh
   useEffect(() => {
     if (notebookConversation.data?.slug) {
       // Update URL with this notebook's conversation
@@ -69,20 +71,16 @@ export default function NotebookPage() {
       const currentConversation = currentUrl.searchParams.get('conversation');
       
       // Only update if the conversation is different
+      // This ensures we don't cause unnecessary re-renders
       if (currentConversation !== notebookConversation.data.slug) {
         currentUrl.searchParams.set('conversation', notebookConversation.data.slug);
         navigate(currentUrl.pathname + currentUrl.search, { replace: true });
       }
-    } else if (notebook.data?.id) {
-      // If notebook exists but no conversation yet, remove conversation param
-      // (conversation will be created when first prompt is sent)
-      const currentUrl = new URL(window.location.href);
-      if (currentUrl.searchParams.has('conversation')) {
-        currentUrl.searchParams.delete('conversation');
-        navigate(currentUrl.pathname + currentUrl.search, { replace: true });
-      }
     }
-  }, [notebookConversation.data?.slug, notebook.data?.id, navigate]);
+    // Don't remove conversation param if notebook exists but no conversation yet
+    // The conversation will be created when first prompt is sent
+    // Removing it would cause the sidebar to close unnecessarily
+  }, [notebookConversation.data?.slug, navigate]);
 
   // Load datasources
   const savedDatasources = useGetDatasourcesByProjectId(
@@ -193,35 +191,25 @@ export default function NotebookPage() {
   };
 
   // Run query with agent mutation
-  const queryClient = useQueryClient();
-  const { openSidebar } = useAgentSidebar();
+  const { openSidebar } = useNotebookSidebar();
 
   const runQueryWithAgentMutation = useRunQueryWithAgent(
     (result, cellId, datasourceId) => {
       // Check if SQL was generated
       if (result.hasSql && result.sqlQuery) {
-        // SQL generation path: execute the SQL query
+        // SQL generation path: create a new code cell with the SQL and execute it
         handleRunQuery(cellId, result.sqlQuery, datasourceId);
       } else {
-        // Chat path: open sidebar with the conversation
-        // Use context to directly open sidebar (reliable, works even if user closed it)
-        openSidebar(result.conversationSlug);
+        // Chat path: open sidebar with the conversation and send message for streaming
+        // Pass the cell's datasource and the query to send through chat interface
+        const cell = normalizedNotebook?.cells.find((c) => c.cellId === cellId);
+        const query = cell?.query || '';
         
-        // Invalidate messages query to ensure fresh data is loaded
-        // Use a delay to ensure the API has finished persisting messages
-        // FactoryAgent persists messages in onFinish callback after stream completes
-        setTimeout(() => {
-          queryClient.invalidateQueries({
-            queryKey: getMessagesByConversationSlugKey(result.conversationSlug),
-          });
-        }, 1000);
-        
-        // Also refetch after a longer delay to catch any late persistence
-        setTimeout(() => {
-          queryClient.invalidateQueries({
-            queryKey: getMessagesByConversationSlugKey(result.conversationSlug),
-          });
-        }, 3000);
+        // Open sidebar and send message through chat interface for proper streaming
+        openSidebar(result.conversationSlug, { 
+          datasourceId,
+          messageToSend: query, // Send the message through chat interface for streaming
+        });
       }
       setLoadingCellId(null);
     },
@@ -245,7 +233,7 @@ export default function NotebookPage() {
     },
   );
 
-  const handleRunQueryWithAgent = (
+  const handleRunQueryWithAgent = async (
     cellId: number,
     query: string,
     datasourceId: string,
@@ -255,15 +243,72 @@ export default function NotebookPage() {
       query,
       datasourceName: datasourceId,
     });
-    runQueryWithAgentMutation.mutate({
-      cellId,
-      query,
-      datasourceId,
-      datasourceRepository,
-      projectId: workspace.projectId || '',
-      userId: workspace.userId || '',
-      notebookId: notebook.data?.id,
-    });
+
+    // For chat path, get/create conversation and send through chat interface for streaming
+    // For SQL detection, we'll check after streaming completes
+    if (notebook.data?.id) {
+      // Get or create conversation for this notebook
+      let conversationSlug: string;
+      const existingConversation = notebookConversation.data;
+      
+      if (existingConversation) {
+        conversationSlug = existingConversation.slug;
+        // Update datasources if needed
+        if (!existingConversation.datasources?.includes(datasourceId)) {
+          await repositories.conversation.update({
+            ...existingConversation,
+            datasources: [...(existingConversation.datasources || []), datasourceId],
+            updatedBy: workspace.username || workspace.userId || 'system',
+            updatedAt: new Date(),
+          });
+        }
+      } else {
+        // Create new conversation
+        const { v4: uuidv4 } = await import('uuid');
+        const conversationId = uuidv4();
+        const now = new Date();
+        const notebookTitle = `Notebook - ${notebook.data.id}`;
+        
+        const newConversation = await repositories.conversation.create({
+          id: conversationId,
+          slug: '', // Repository will generate slug
+          title: notebookTitle,
+          projectId: workspace.projectId || '',
+          taskId: uuidv4(),
+          datasources: [datasourceId],
+          createdAt: now,
+          updatedAt: now,
+          createdBy: workspace.userId || 'system',
+          updatedBy: workspace.username || workspace.userId || 'system',
+          seedMessage: '',
+          isPublic: false,
+        });
+        conversationSlug = newConversation.slug;
+      }
+
+      // Open sidebar and send message through chat interface for proper streaming
+      openSidebar(conversationSlug, {
+        datasourceId,
+        messageToSend: query, // This will be sent through chat interface and stream properly
+      });
+      
+      // Keep loading state until message is sent (delay matches the send delay in notebook-sidebar-context)
+      // The chat interface will handle the loading state once streaming starts
+      setTimeout(() => {
+        setLoadingCellId(null);
+      }, 600); // Slightly longer than the 500ms delay in notebook-sidebar-context
+    } else {
+      // Fallback to old API if notebook not loaded
+      runQueryWithAgentMutation.mutate({
+        cellId,
+        query,
+        datasourceId,
+        datasourceRepository,
+        projectId: workspace.projectId || '',
+        userId: workspace.userId || '',
+        notebookId: notebook.data?.id,
+      });
+    }
   };
 
   const normalizedNotebook: Notebook | undefined = !notebook.data
@@ -380,7 +425,6 @@ export default function NotebookPage() {
     },
     [normalizedNotebook, scheduleAutoSave],
   );
-
   const handleNotebookChange = useCallback(
     (changes: Partial<Notebook>) => {
       if (!normalizedNotebook) {

@@ -27,7 +27,7 @@ export function DatasourceBadge({
             <HoverCardTrigger asChild>
                 <div
                     className={cn(
-                        'group flex h-6 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 text-xs transition-colors hover:bg-muted cursor-default',
+                        'group flex h-6 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 text-xs transition-colors hover:bg-muted cursor-default min-w-0 max-w-full',
                         className,
                     )}
                 >
@@ -40,7 +40,7 @@ export function DatasourceBadge({
                     ) : (
                         <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     )}
-                    <span className="truncate text-xs font-medium">{datasource.name}</span>
+                    <span className="truncate text-xs font-medium min-w-0">{datasource.name}</span>
                 </div>
             </HoverCardTrigger>
             <HoverCardContent className="w-72 p-4" side="top">
@@ -161,9 +161,9 @@ function DatasourceBadgesHover({
     return (
         <HoverCard open={isOpen} onOpenChange={handleOpenChange}>
             <HoverCardTrigger asChild>
-                <div className="group flex h-6 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 text-xs transition-colors hover:bg-muted cursor-default">
+                <div className="group flex h-6 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 text-xs transition-colors hover:bg-muted cursor-default min-w-0 max-w-full">
                     <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate text-xs font-medium">
+                    <span className="truncate text-xs font-medium min-w-0">
                         {datasources.length} datasources
                     </span>
                 </div>
@@ -210,16 +210,21 @@ function DatasourceBadgesHover({
                                             <Database className="h-4 w-4 text-muted-foreground" />
                                         )}
                                     </div>
-                                    <div className="flex-1 min-w-0 flex items-center justify-between gap-1.5 flex-wrap">
-                                        <p className="text-xs font-medium truncate">
-                                            {datasource.name}
-                                        </p>
-                                        {datasource.datasource_provider && (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground capitalize">
-                                                {datasource.datasource_provider.replace(/_/g, ' ')}
-                                            </span>
-                                        )}
-                                    </div>
+                  <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+                    <p className="text-xs font-medium break-words min-w-0">
+                      {datasource.name}
+                    </p>
+                    {datasource.slug && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-background border border-border text-muted-foreground shrink-0">
+                        {datasource.slug}
+                      </span>
+                    )}
+                    {datasource.datasource_provider && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground capitalize shrink-0">
+                        {datasource.datasource_provider.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                  </div>
                                 </div>
                             );
                         })}

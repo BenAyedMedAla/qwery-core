@@ -42,7 +42,7 @@ export const EnhancedMessageResponse = memo(
         <HeadingContext.Provider value={headingContextValue}>
           <div
             className={cn(
-              'size-full break-words [&_a]:break-all [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
+              'size-full break-words overflow-x-hidden [&_a]:break-all [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>*]:max-w-full [&>*]:min-w-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words',
               className,
             )}
           >

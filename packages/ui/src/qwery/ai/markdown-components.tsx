@@ -112,7 +112,7 @@ export const createAgentMarkdownComponents = (): Components => {
       return (
         <h2
           {...props}
-          className={cn('text-xl leading-tight font-semibold mt-3 mb-2', className)}
+          className={cn('text-xl leading-tight font-semibold mt-3 mb-2 break-words overflow-wrap-anywhere', className)}
         >
           {children}
         </h2>
@@ -127,21 +127,21 @@ export const createAgentMarkdownComponents = (): Components => {
       return (
         <h3
           {...props}
-          className={cn('text-lg leading-tight font-semibold mt-3 mb-2', className)}
+          className={cn('text-lg leading-tight font-semibold mt-3 mb-2 break-words overflow-wrap-anywhere', className)}
         >
           {children}
         </h3>
       );
     },
-    p: ({ className, ...props }) => (
-      <p {...props} className={cn('my-2 text-sm leading-6', className)} />
-    ),
+  p: ({ className, ...props }) => (
+    <p {...props} className={cn('my-2 text-sm leading-6 break-words overflow-wrap-anywhere', className)} />
+  ),
     a: ({ className, href, children, ...props }) => (
       <a
         {...props}
         href={href}
         className={cn(
-          'text-primary decoration-primary/50 hover:decoration-primary underline underline-offset-2 transition',
+          'text-primary decoration-primary/50 hover:decoration-primary underline underline-offset-2 transition break-words overflow-wrap-anywhere',
           className,
         )}
         target="_blank"
@@ -151,13 +151,13 @@ export const createAgentMarkdownComponents = (): Components => {
     ul: ({ className, ...props }) => (
       <ul
         {...props}
-        className={cn('my-2 list-disc pl-6 text-sm leading-6', className)}
+        className={cn('my-2 list-disc pl-6 text-sm leading-6 break-words overflow-wrap-anywhere min-w-0', className)}
       />
     ),
     ol: ({ className, ...props }) => (
       <ol
         {...props}
-        className={cn('my-2 list-decimal pl-6 text-sm leading-6', className)}
+        className={cn('my-2 list-decimal pl-6 text-sm leading-6 break-words overflow-wrap-anywhere min-w-0', className)}
       />
     ),
     li: ({ className, children, ...props }) => {
@@ -205,7 +205,7 @@ export const createAgentMarkdownComponents = (): Components => {
           <li
             {...props}
             className={cn(
-              'marker:text-muted-foreground group relative my-1 pr-6 text-sm leading-6',
+              'marker:text-muted-foreground group relative my-1 pr-6 text-sm leading-6 break-words overflow-wrap-anywhere min-w-0',
               className,
             )}
           >
@@ -219,7 +219,7 @@ export const createAgentMarkdownComponents = (): Components => {
         <li
           {...props}
           className={cn(
-            'marker:text-muted-foreground my-1 text-sm leading-6',
+            'marker:text-muted-foreground my-1 text-sm leading-6 break-words overflow-wrap-anywhere min-w-0',
             className,
           )}
         >
@@ -231,7 +231,7 @@ export const createAgentMarkdownComponents = (): Components => {
       <blockquote
         {...props}
         className={cn(
-          'border-border/60 text-muted-foreground my-4 border-l-2 pl-4 text-sm italic',
+          'border-border/60 text-muted-foreground my-4 border-l-2 pl-4 text-sm italic break-words overflow-wrap-anywhere',
           className,
         )}
       />
@@ -251,26 +251,29 @@ export const createAgentMarkdownComponents = (): Components => {
         );
       }
       return (
-        <pre
-          className={cn(
-            'bg-muted/50 text-muted-foreground/90 relative my-3 overflow-x-auto rounded-md p-4 text-xs',
-            className,
-          )}
-        >
-          <code {...props} className="font-mono leading-5">
-            {children}
-          </code>
-        </pre>
+        <div className="w-full min-w-0 max-w-full overflow-x-auto" style={{ maxWidth: '100%' }}>
+          <pre
+            className={cn(
+              'bg-muted/50 text-muted-foreground/90 relative my-3 rounded-md p-4 text-xs max-w-full',
+              className,
+            )}
+          >
+            <code {...props} className="font-mono leading-5 break-words whitespace-pre-wrap max-w-full">
+              {children}
+            </code>
+          </pre>
+        </div>
       );
     },
     table: ({ className, ...props }) => (
-      <div className="my-4 w-full overflow-x-auto">
+      <div className="my-4 w-full min-w-0 max-w-full overflow-x-auto" style={{ maxWidth: '100%' }}>
         <table
           {...props}
           className={cn(
-            '[&_tr:nth-child(even)]:bg-muted/30 w-full border-collapse text-left text-sm [&_td]:py-2 [&_td]:align-top [&_th]:border-b [&_th]:pb-2 [&_th]:text-xs',
+            '[&_tr:nth-child(even)]:bg-muted/30 w-full border-collapse text-left text-sm [&_td]:py-2 [&_td]:align-top [&_td]:break-words [&_td]:max-w-0 [&_th]:border-b [&_th]:pb-2 [&_th]:text-xs [&_th]:break-words',
             className,
           )}
+          style={{ width: '100%', maxWidth: '100%' }}
         />
       </div>
     ),
@@ -303,6 +306,13 @@ export const createAgentMarkdownComponents = (): Components => {
     },
     em: ({ className, ...props }) => (
       <em {...props} className={cn('italic', className)} />
+    ),
+    img: ({ className, ...props }) => (
+      <img
+        {...props}
+        className={cn('max-w-full h-auto rounded-md', className)}
+        style={{ maxWidth: '100%', height: 'auto' }}
+      />
     ),
   };
 };

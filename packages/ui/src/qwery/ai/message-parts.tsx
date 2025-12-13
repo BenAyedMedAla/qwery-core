@@ -196,7 +196,7 @@ export function TextPart({
       <HeadingContext.Provider value={headingContextValue}>
         <Message key={`${messageId}-${index}`} from={messageRole}>
           <MessageContent>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
+            <div className="prose prose-sm dark:prose-invert max-w-none min-w-0 break-words overflow-wrap-anywhere overflow-x-hidden [&>*]:max-w-full [&>*]:min-w-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={agentMarkdownComponents}
@@ -268,7 +268,7 @@ export function ReasoningPart({
         >
           <ReasoningTrigger />
           <ReasoningContent>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
+            <div className="prose prose-sm dark:prose-invert max-w-none min-w-0 break-words overflow-wrap-anywhere overflow-x-hidden [&>*]:max-w-full [&>*]:min-w-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={agentMarkdownComponents}
