@@ -313,7 +313,7 @@ export class DuckDBQueryEngine extends AbstractQueryEngine {
 
         for (const view of views) {
           const escapedViewName = view.table_name.replace(/"/g, '""');
-        await this.connection.run(`DROP VIEW IF EXISTS "${escapedViewName}"`);
+          await this.connection.run(`DROP VIEW IF EXISTS "${escapedViewName}"`);
         }
         this.attachedDatasources.delete(datasource.id);
       } catch (error) {

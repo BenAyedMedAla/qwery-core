@@ -180,7 +180,9 @@ async function discoverTabs(
   };
 
   // 1. Try to discover all tabs via metadata (most reliable for naming)
-  console.log(`[GSheetAttach] Fetching metadata for spreadsheet ${spreadsheetId}`);
+  console.log(
+    `[GSheetAttach] Fetching metadata for spreadsheet ${spreadsheetId}`,
+  );
   const metadata = await fetchSpreadsheetMetadata(spreadsheetId);
   for (const meta of metadata) {
     addTab(meta.gid, getCsvUrlForTab(spreadsheetId, meta.gid), meta.name);

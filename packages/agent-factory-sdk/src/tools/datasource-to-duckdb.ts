@@ -294,7 +294,10 @@ export async function datasourceToDuckdb(
       `tmp_${datasource.id}_${baseName}_${tablePart}`.toLowerCase(),
     );
 
-    const escapedTempViewNameWithTable = tempViewNameWithTable.replace(/"/g, '""');
+    const escapedTempViewNameWithTable = tempViewNameWithTable.replace(
+      /"/g,
+      '""',
+    );
 
     // Fallback: select from driver-accessible table directly
     const tableQuery = `SELECT * FROM ${firstTable.schema}.${firstTable.name}`;
